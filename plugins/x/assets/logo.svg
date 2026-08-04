@@ -1,6 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
-  <title id="title">X</title>
-  <desc id="desc">Read-only X plugin logo</desc>
-  <rect width="128" height="128" rx="28" fill="#0A0A0A"/>
-  <path fill="#FFFFFF" d="M90.2 28 58.4 64.8 94 100H80.6L54.2 70.6 28.6 100H18l33.8-38.8L22 28h13.5l24.4 27.2L84.8 28h5.4z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="X">
+  <!-- Mark from SVGL: https://svgl.app/library/x.svg -->
+  <rect width="128" height="128" rx="28" fill="#000"/>
+  <g transform="translate(28 27) scale(0.06)">
+    <path fill="#fff" d="M714.163 519.284 1160.89 0h-105.86L667.137 450.887 357.328 0H0l468.492 681.821L0 1226.37h105.866l409.625-476.152 327.181 476.152H1200L714.137 519.284h.026ZM569.165 687.828l-47.468-67.894-377.686-540.24h162.604l304.797 435.991 47.468 67.894 396.2 566.721H892.476L569.165 687.854v-.026Z"/>
+  </g>
 </svg>
