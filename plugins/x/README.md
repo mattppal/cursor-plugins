@@ -42,7 +42,7 @@ npm test
 npm run build
 ```
 
-`mcp.json` starts a small launcher that finds `server/dist/index.js` whether Cursor's cwd is the marketplace repo root or the plugin folder. Rebuild after server changes.
+`mcp.json` starts `~/.cursor/plugins/local/x/server/run.sh`, which resolves the bundle next to itself. That keeps MCP independent of whichever workspace is open. Rebuild after server changes.
 
 ## Limits
 

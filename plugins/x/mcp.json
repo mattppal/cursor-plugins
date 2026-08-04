@@ -4,7 +4,7 @@
       "command": "bash",
       "args": [
         "-c",
-        "for p in server/dist/index.js plugins/x/server/dist/index.js x/server/dist/index.js; do if [[ -f \"$p\" ]]; then exec node \"$p\"; fi; done; echo \"[x] MCP bundle not found from $PWD\" >&2; exit 1"
+        "exec bash \"$HOME/.cursor/plugins/local/x/server/run.sh\""
       ],
       "env": {
         "X_BEARER_TOKEN": "${X_BEARER_TOKEN}"
