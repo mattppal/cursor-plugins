@@ -4,7 +4,7 @@
       "command": "bash",
       "args": [
         "-c",
-        "exec bash \"$HOME/.cursor/plugins/local/x/server/run.sh\""
+        "for s in \"$HOME/.cursor/plugins/local/x/server/run.sh\" \"$HOME/Developer/git-repos/cursor-plugins/plugins/x/server/run.sh\"; do if [[ -f \"$s\" ]]; then exec bash \"$s\"; fi; done; echo \"[x] run.sh not found. Symlink plugins/x to ~/.cursor/plugins/local/x\" >&2; exit 1"
       ],
       "env": {
         "X_BEARER_TOKEN": "${X_BEARER_TOKEN}"

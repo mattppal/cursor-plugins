@@ -1,12 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-bundle="$here/dist/index.js"
+candidates=()
 
-if [[ ! -f "$bundle" ]]; then
-  echo "[x] MCP bundle missing at $bundle" >&2
-  exit 1
+if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  candidates+=("$here/dist/index.js")
 fi
 
-exec node "$bundle"
+candidates+=(
+  "$HOME/.cursor/plugins/local/x/server/dist/index.js"
+  "$HOME/Developer/git-repos/cursor-plugins/plugins/x/server/dist/index.js"
+)
+
+while IFS= read -r snapshot; do
+  candidates+=("$snapshot")
+done < <(find "$HOME/.cursor/plugins/marketplaces" -path '*/plugins/x/server/dist/index.js' 2>/dev/null | sort)
+
+for bundle in "${candidates[@]}"; do
+  if [[ -f "$bundle" ]]; then
+    exec node "$bundle"
+  fi
+done
+
+echo "[x] MCP bundle not found. Tried:" >&2
+printf '  %s\n' "${candidates[@]}" >&2
+exit 1
