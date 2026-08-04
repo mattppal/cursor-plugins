@@ -2,9 +2,9 @@
 
 Read-only [Cursor](https://cursor.com) plugin for the [X API v2](https://developer.x.com/en/docs/twitter-api). Search posts, look up users, read timelines, and inspect threads.
 
-Write actions (post, like, follow, DM, bookmark) are not included.
+This plugin does not post, like, follow, DM, or bookmark.
 
-## Install locally
+## Install
 
 From the repository root:
 
@@ -13,11 +13,16 @@ mkdir -p ~/.cursor/plugins/local
 ln -sfn "$(pwd)/plugins/x" ~/.cursor/plugins/local/x
 ```
 
-Reload Cursor, then set **X Bearer Token** under **Settings → Plugins → X → Configure**.
+Reload the window (**Developer: Reload Window**).
 
-Create the token in the [X Developer Portal](https://developer.x.com/en/portal/dashboard) (**Keys and tokens → Bearer Token**). App-only auth is enough for these tools.
+To install from the marketplace catalog instead, see the [repository README](../../README.md#install).
 
-You can also run `/x-setup` in chat.
+### Configure the token
+
+1. Create an app-only **Bearer Token** in the [X Developer Portal](https://developer.x.com/en/portal/dashboard) under **Keys and tokens**.
+2. Set it in **Cursor Settings → Plugins → X → Configure → X Bearer Token**.
+
+In chat, `/x-setup` walks through the same steps.
 
 ## Tools
 
@@ -42,8 +47,10 @@ npm test
 npm run build
 ```
 
-`mcp.json` starts `./server/run.sh`, which is relative to the plugin root. Rebuild after server changes, then refresh the marketplace snapshot or reload the window.
+Cursor starts plugin MCP servers with the active workspace as cwd, so `mcp.json` launches `~/.cursor/plugins/local/x/server/launch.mjs` instead of a relative `./server/dist/index.js`. Keep the local symlink in place. Rebuild after server changes, then reload the window.
 
 ## Limits
 
-Availability and monthly post-read quota depend on your X API plan. Recent search is a rolling 7-day window. Home timeline and bookmarks need user-context OAuth and are out of scope for this version.
+- Endpoint access and monthly post-read quota depend on your X API plan.
+- Recent search covers a rolling 7-day window.
+- Home timeline and bookmarks need user-context OAuth and are out of scope.

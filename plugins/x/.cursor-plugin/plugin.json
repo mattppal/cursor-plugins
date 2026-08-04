@@ -1,8 +1,8 @@
 {
   "name": "x",
   "displayName": "X",
-  "version": "0.1.0",
-  "description": "Read-only access to X (Twitter) via the official v2 API — search posts, look up users, read timelines, and inspect threads.",
+  "version": "0.1.1",
+  "description": "Read-only access to X (Twitter) through the official v2 API. Search posts, look up users, read timelines, and inspect threads.",
   "author": {
     "name": "Matt Palmer",
     "email": "59450879+mattppal@users.noreply.github.com"
@@ -20,7 +20,7 @@
       "X_BEARER_TOKEN": {
         "type": "string",
         "title": "X Bearer Token",
-        "description": "App-only bearer token from the X Developer Portal (https://developer.x.com/en/portal/dashboard). Used only for read-only v2 calls."
+        "description": "App-only bearer token from the X Developer Portal. Required for read-only v2 calls. Create one at https://developer.x.com/en/portal/dashboard."
       }
     },
     "required": ["X_BEARER_TOKEN"]

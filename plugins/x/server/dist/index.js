@@ -21565,7 +21565,7 @@ function looksLikeUserId(value) {
 // src/index.ts
 var server = new McpServer({
   name: "x",
-  version: "0.1.0"
+  version: "0.1.1"
 });
 function getClient() {
   const bearerToken = resolveBearerToken();
@@ -21623,7 +21623,7 @@ async function resolveUserId(client, usernameOrId) {
 }
 server.tool(
   "search_posts",
-  "Search recent public posts on X from the last 7 days. Supports X query operators such as from:user, to:user, lang:en, is:reply, is:retweet, has:links, has:media, conversation_id:ID, url:example.com, and quoted phrases. This plugin is read-only.",
+  "Search public posts from the last 7 days. Supports X query operators such as from:user, lang:en, is:reply, is:retweet, has:media, conversation_id:ID, url:example.com, and quoted phrases.",
   {
     query: external_exports.string().min(1).describe("X recent-search query. Example: from:openai -is:retweet lang:en"),
     max_results: external_exports.number().int().min(10).max(100).optional().describe("Number of posts to return (10-100). Defaults to 10."),
@@ -21717,7 +21717,7 @@ server.tool(
 );
 server.tool(
   "get_user_posts",
-  "Get recent posts authored by a user. Accepts a username or numeric user ID. Does not include the authenticated home timeline.",
+  "Get recent posts authored by a user. Accepts a username or numeric user ID. This is not the authenticated home timeline.",
   {
     username_or_id: external_exports.string().min(1).describe("Username or numeric user ID"),
     max_results: external_exports.number().int().min(5).max(100).optional().describe("Number of posts to return (5-100). Defaults to 10."),
@@ -21783,7 +21783,7 @@ server.tool(
 );
 server.tool(
   "get_thread",
-  "Fetch a conversation thread for a post ID or status URL. Resolves the conversation_id, then searches recent posts in that thread.",
+  "Fetch a reply thread for a post ID or status URL. Resolves conversation_id, then searches recent posts in that thread.",
   {
     id_or_url: external_exports.string().min(1).describe("Post ID or x.com / twitter.com status URL"),
     max_results: external_exports.number().int().min(10).max(100).optional().describe("Max thread posts to return (10-100). Defaults to 50.")
@@ -21837,7 +21837,7 @@ server.tool(
 );
 server.tool(
   "search_spaces",
-  "Search X Spaces by keyword. Availability depends on your X API plan.",
+  "Search X Spaces by keyword. Filter by live, scheduled, or all. Availability depends on the X API plan.",
   {
     query: external_exports.string().min(1).describe("Keyword query for Spaces"),
     state: external_exports.enum(["live", "scheduled", "all"]).optional().describe("Filter by Space state. Defaults to all live+scheduled depending on API defaults."),
@@ -21854,7 +21854,7 @@ server.tool(
 );
 server.tool(
   "get_api_usage",
-  "Show recent X API project usage for post reads. Useful before running broader searches so you do not burn monthly quota.",
+  "Show recent project usage for post reads. Check this before broad searches if monthly quota is a concern.",
   async () => {
     try {
       return jsonResult(await getClient().getUsage());
