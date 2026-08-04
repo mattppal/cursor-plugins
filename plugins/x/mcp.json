@@ -1,11 +1,7 @@
 {
   "mcpServers": {
     "x": {
-      "command": "bash",
-      "args": [
-        "-c",
-        "for s in \"$HOME/.cursor/plugins/local/x/server/run.sh\" \"$HOME/Developer/git-repos/cursor-plugins/plugins/x/server/run.sh\"; do if [[ -f \"$s\" ]]; then exec bash \"$s\"; fi; done; echo \"[x] run.sh not found. Symlink plugins/x to ~/.cursor/plugins/local/x\" >&2; exit 1"
-      ],
+      "command": "./server/run.sh",
       "env": {
         "X_BEARER_TOKEN": "${X_BEARER_TOKEN}"
       }

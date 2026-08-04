@@ -14,7 +14,6 @@
   "category": "productivity",
   "tags": ["x", "twitter", "mcp", "read-only"],
   "logo": "assets/logo.svg",
-  "mcpServers": "./mcp.json",
   "variables": {
     "type": "object",
     "properties": {

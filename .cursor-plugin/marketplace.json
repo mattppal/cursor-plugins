@@ -6,12 +6,13 @@
   },
   "metadata": {
     "description": "Personal Cursor plugins marketplace",
-    "version": "0.1.0"
+    "version": "0.1.0",
+    "pluginRoot": "plugins"
   },
   "plugins": [
     {
       "name": "x",
-      "source": "./plugins/x",
+      "source": "x",
       "description": "Read-only X (Twitter) API — search posts, look up users, and browse timelines"
     }
   ]

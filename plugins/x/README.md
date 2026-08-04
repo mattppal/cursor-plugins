@@ -42,7 +42,7 @@ npm test
 npm run build
 ```
 
-MCP is launched through `server/run.sh`, resolved from the local symlink or this checkout. That avoids Cursor's workspace `cwd`, which is not the plugin root. After editing the server, rebuild, then refresh the local marketplace snapshot or reload the window.
+`mcp.json` starts `./server/run.sh`, which is relative to the plugin root. Rebuild after server changes, then refresh the marketplace snapshot or reload the window.
 
 ## Limits
 
