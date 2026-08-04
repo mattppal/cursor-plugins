@@ -42,7 +42,7 @@ npm test
 npm run build
 ```
 
-`mcp.json` runs the bundled `server/dist/index.js`, so rebuild after server changes.
+`mcp.json` starts a small launcher that finds `server/dist/index.js` whether Cursor's cwd is the marketplace repo root or the plugin folder. Rebuild after server changes.
 
 ## Limits
 
