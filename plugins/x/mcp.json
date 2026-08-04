@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "x": {
+      "command": "node",
+      "args": ["./server/dist/index.js"],
+      "env": {
+        "X_BEARER_TOKEN": "${X_BEARER_TOKEN}"
+      }
+    }
+  }
+}

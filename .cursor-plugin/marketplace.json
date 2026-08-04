@@ -1,0 +1,18 @@
+{
+  "name": "matt-cursor-plugins",
+  "owner": {
+    "name": "Matt Palmer",
+    "email": "59450879+mattppal@users.noreply.github.com"
+  },
+  "metadata": {
+    "description": "Personal Cursor plugins marketplace",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "x",
+      "source": "./plugins/x",
+      "description": "Read-only X (Twitter) API — search posts, look up users, and browse timelines"
+    }
+  ]
+}
