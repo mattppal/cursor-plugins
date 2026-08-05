@@ -1,8 +1,8 @@
 {
   "name": "x",
   "displayName": "X",
-  "version": "0.1.1",
-  "description": "Read-only access to X (Twitter) through the official v2 API. Search posts, look up users, read timelines, and inspect threads.",
+  "version": "0.2.0",
+  "description": "Read-only access to X (Twitter) through the official v2 API. Search posts, look up users, read timelines, and browse your own bookmarks, home feed, and likes.",
   "author": {
     "name": "Matt Palmer",
     "email": "59450879+mattppal@users.noreply.github.com"

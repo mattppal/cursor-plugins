@@ -1,6 +1,6 @@
 ---
 name: x
-description: Search and read public X (Twitter) posts, profiles, threads, mentions, quote posts, and Spaces. Use when finding tweets or X posts, looking up accounts, reading timelines, inspecting threads, checking mentions, quote-posts, or live Spaces. Read-only; do not post, like, follow, or DM.
+description: Search and read X (Twitter) posts, profiles, threads, mentions, quote posts, and Spaces, plus the signed-in user's bookmarks, home timeline, and liked posts. Use when finding tweets or X posts, looking up accounts, reading timelines, checking bookmarks or likes, inspecting threads, or browsing the user's feed. Read-only; do not post, like, follow, or DM.
 ---
 
 # X
@@ -9,12 +9,20 @@ This plugin is read-only. Do not post, like, repost, follow, bookmark, or send D
 
 ## Setup
 
-If a tool fails with a missing or invalid bearer token, run `/x-setup`, or walk the user through:
+Public tools need an app-only bearer token. If a tool fails with a missing or invalid bearer token, run `/x-setup`, or walk the user through:
 
 1. Open the [X Developer Portal](https://developer.x.com/en/portal/dashboard).
 2. Create or select a Project and App.
 3. Copy the **Bearer Token** (app-only auth).
 4. Set it in **Cursor Settings → Plugins → X → Configure** as `X_BEARER_TOKEN`.
+
+Personal tools (`get_bookmarks`, `get_home_timeline`, `get_liked_posts`) need a one-time OAuth login. If one fails asking for login, have the user run it in a terminal outside Cursor:
+
+```bash
+cd plugins/x/server && npm run login
+```
+
+The script asks for the app's OAuth 2.0 Client ID and Secret, opens a browser to authorize, and saves tokens to `~/.cursor/x-plugin/tokens.json`. The server refreshes them automatically afterward.
 
 ## Choose a tool
 
@@ -28,9 +36,14 @@ If a tool fails with a missing or invalid bearer token, run `/x-setup`, or walk 
 | Full reply thread | `get_thread` |
 | Quotes of a post | `get_quote_posts` |
 | Live or scheduled Spaces | `search_spaces` |
+| The user's saved bookmarks | `get_bookmarks` |
+| The user's home feed | `get_home_timeline` |
+| Posts the user has liked | `get_liked_posts` |
 | Remaining project quota | `get_api_usage` |
 
 Timeline tools accept usernames. Resolve `@username` with `get_user` only when a later call needs the numeric ID.
+
+When the user asks about something they saved, bookmarked, or "liked a while back", check `get_bookmarks` or `get_liked_posts` before searching: `search_posts` only covers the last 7 days.
 
 ## Search operators
 
@@ -67,9 +80,15 @@ When the user gives an explicit time window, pass it as `start_time` / `end_time
 - Summarize in chat: author, timestamp, permalink, key metrics, and a short excerpt. Do not dump every entity or media blob unless asked.
 - Include permalinks (`https://x.com/{user}/status/{id}`) so the user can open the source.
 
+## Login troubleshooting
+
+- "No X user credentials found": run `npm run login` in `plugins/x/server`.
+- "credentials expired or were revoked": re-run the login; the refresh token was invalidated.
+- Token exchange fails with `invalid_request`: confirm the app is a confidential (Web App) client and that `http://127.0.0.1:8917/callback` is registered exactly as a redirect URI.
+- 403 on `get_home_timeline` only: the endpoint may need an extra scope on some plans. Re-run login with `npm run login -- --scopes "tweet.read users.read bookmark.read like.read timeline.read offline.access"`.
+
 ## Out of scope
 
-- Home timeline (needs user-context OAuth)
-- Bookmarks, DMs, likes given, and most followers/following graphs
+- DMs and most followers/following graphs
 - Search older than 7 days (`/2/tweets/search/all`, academic/enterprise)
-- Any write action
+- Any write action, including creating bookmarks or likes
