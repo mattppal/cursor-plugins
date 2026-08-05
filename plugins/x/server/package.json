@@ -1,7 +1,7 @@
 {
   "name": "x-mcp-server",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
   "description": "Read-only MCP server for the X (Twitter) API v2",
   "bin": {
@@ -11,6 +11,7 @@
     "build": "esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --banner:js=\"#!/usr/bin/env node\"",
     "test": "tsx --test src/*.test.ts",
     "start": "node launch.mjs",
+    "login": "tsx src/login.ts",
     "dev": "tsx src/index.ts"
   },
   "engines": {

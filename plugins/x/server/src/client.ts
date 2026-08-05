@@ -97,7 +97,7 @@ export class XClient {
   constructor(options: XClientOptions) {
     this.bearerToken = options.bearerToken;
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.userAgent = options.userAgent ?? "matt-cursor-plugins-x/0.1.0";
+    this.userAgent = options.userAgent ?? "matt-cursor-plugins-x/0.2.0";
   }
 
   searchPosts(params: SearchPostsParams): Promise<XListResponse<XPost>> {
@@ -217,6 +217,37 @@ export class XClient {
 
   getUsage(): Promise<unknown> {
     return this.get("/usage/tweets");
+  }
+
+  /** Requires an OAuth 2.0 user-context access token for the given user. */
+  getBookmarks(userId: string, params: { maxResults?: number; nextToken?: string } = {}): Promise<XListResponse<XPost>> {
+    return this.getPostPage(`/users/${encodeURIComponent(userId)}/bookmarks`, params, 1);
+  }
+
+  /** Requires an OAuth 2.0 user-context access token for the given user. */
+  getHomeTimeline(userId: string, params: TimelineParams = {}): Promise<XListResponse<XPost>> {
+    return this.getTimeline(`/users/${encodeURIComponent(userId)}/timelines/reverse_chronological`, params);
+  }
+
+  /** Requires an OAuth 2.0 user-context access token for the given user. */
+  getLikedPosts(userId: string, params: { maxResults?: number; nextToken?: string } = {}): Promise<XListResponse<XPost>> {
+    return this.getPostPage(`/users/${encodeURIComponent(userId)}/liked_tweets`, params, 5);
+  }
+
+  private getPostPage(
+    path: string,
+    params: { maxResults?: number; nextToken?: string },
+    minResults: number
+  ): Promise<XListResponse<XPost>> {
+    const query = new URLSearchParams({
+      "tweet.fields": TWEET_FIELDS,
+      "user.fields": USER_FIELDS,
+      "media.fields": MEDIA_FIELDS,
+      expansions: POST_EXPANSIONS,
+      max_results: String(clampMaxResults(params.maxResults, minResults, 100, 10)),
+    });
+    if (params.nextToken) query.set("pagination_token", params.nextToken);
+    return this.get(`${path}?${query}`);
   }
 
   private getTimeline(path: string, params: TimelineParams): Promise<XListResponse<XPost>> {

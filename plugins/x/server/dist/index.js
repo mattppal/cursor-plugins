@@ -21148,6 +21148,136 @@ var StdioServerTransport = class {
   }
 };
 
+// src/auth.ts
+import { createHash, randomBytes } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+var TOKEN_URL = "https://api.x.com/2/oauth2/token";
+var LOGIN_HINT = "Run `cd plugins/x/server && npm run login` to authorize the X plugin with your account.";
+var EXPIRY_SKEW_MS = 6e4;
+var OAuthError = class extends Error {
+  status;
+  body;
+  constructor(message, options) {
+    super(message);
+    this.name = "OAuthError";
+    this.status = options.status;
+    this.body = options.body;
+  }
+};
+function defaultTokenFilePath() {
+  return join(homedir(), ".cursor", "x-plugin", "tokens.json");
+}
+function refreshAccessToken(params) {
+  return postTokenRequest(
+    {
+      grant_type: "refresh_token",
+      refresh_token: params.refreshToken
+    },
+    params.clientId,
+    params.clientSecret,
+    params.fetchImpl ?? fetch
+  );
+}
+async function postTokenRequest(body, clientId, clientSecret, fetchImpl) {
+  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  const response = await fetchImpl(TOKEN_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${basic}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams(body).toString()
+  });
+  const text = await response.text();
+  let parsed;
+  try {
+    parsed = text ? JSON.parse(text) : void 0;
+  } catch {
+    parsed = text;
+  }
+  if (!response.ok) {
+    const detail = typeof parsed === "object" && parsed ? [parsed.error, parsed.error_description].filter(Boolean).join(": ") : String(parsed ?? "");
+    throw new OAuthError(`X OAuth token request failed (${response.status})${detail ? ` \u2014 ${detail}` : ""}`, {
+      status: response.status,
+      body: parsed
+    });
+  }
+  return parsed;
+}
+async function readTokenFile(filePath = defaultTokenFilePath()) {
+  let text;
+  try {
+    text = await readFile(filePath, "utf8");
+  } catch (error2) {
+    if (error2.code === "ENOENT") {
+      throw new Error(`No X user credentials found at ${filePath}. ${LOGIN_HINT}`);
+    }
+    throw error2;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`X token file at ${filePath} is not valid JSON. ${LOGIN_HINT}`);
+  }
+  const tokens = parsed;
+  if (!tokens || typeof tokens.access_token !== "string" || typeof tokens.refresh_token !== "string" || typeof tokens.expires_at !== "number" || typeof tokens.user_id !== "string" || typeof tokens.client_id !== "string" || typeof tokens.client_secret !== "string") {
+    throw new Error(`X token file at ${filePath} is missing required fields. ${LOGIN_HINT}`);
+  }
+  return { scopes: [], ...tokens };
+}
+async function writeTokenFile(tokens, filePath = defaultTokenFilePath()) {
+  await mkdir(dirname(filePath), { recursive: true, mode: 448 });
+  const tempPath = `${filePath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(tokens, null, 2)}
+`, { mode: 384 });
+  await rename(tempPath, filePath);
+}
+async function getUserAccessToken(options = {}) {
+  const filePath = options.filePath ?? defaultTokenFilePath();
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const now = options.now ?? Date.now;
+  const stored = await readTokenFile(filePath);
+  if (isFresh(stored, now())) {
+    return { accessToken: stored.access_token, userId: stored.user_id };
+  }
+  const latest = await readTokenFile(filePath);
+  if (isFresh(latest, now())) {
+    return { accessToken: latest.access_token, userId: latest.user_id };
+  }
+  try {
+    const refreshed = await refreshAccessToken({
+      clientId: latest.client_id,
+      clientSecret: latest.client_secret,
+      refreshToken: latest.refresh_token,
+      fetchImpl
+    });
+    const next = {
+      ...latest,
+      access_token: refreshed.access_token,
+      refresh_token: refreshed.refresh_token ?? latest.refresh_token,
+      expires_at: now() + refreshed.expires_in * 1e3,
+      scopes: refreshed.scope ? refreshed.scope.split(" ") : latest.scopes
+    };
+    await writeTokenFile(next, filePath);
+    return { accessToken: next.access_token, userId: next.user_id };
+  } catch (error2) {
+    if (error2 instanceof OAuthError && (error2.status === 400 || error2.status === 401)) {
+      const rereadTokens = await readTokenFile(filePath);
+      if (rereadTokens.refresh_token !== latest.refresh_token && isFresh(rereadTokens, now())) {
+        return { accessToken: rereadTokens.access_token, userId: rereadTokens.user_id };
+      }
+      throw new Error(`X user credentials expired or were revoked (${error2.message}). ${LOGIN_HINT}`);
+    }
+    throw error2;
+  }
+}
+function isFresh(tokens, nowMs) {
+  return tokens.expires_at - EXPIRY_SKEW_MS > nowMs;
+}
+
 // src/client.ts
 var API_BASE = "https://api.x.com/2";
 var TWEET_FIELDS = [
@@ -21224,7 +21354,7 @@ var XClient = class {
   constructor(options) {
     this.bearerToken = options.bearerToken;
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.userAgent = options.userAgent ?? "matt-cursor-plugins-x/0.1.0";
+    this.userAgent = options.userAgent ?? "matt-cursor-plugins-x/0.2.0";
   }
   searchPosts(params) {
     const query = new URLSearchParams({
@@ -21334,6 +21464,29 @@ var XClient = class {
   }
   getUsage() {
     return this.get("/usage/tweets");
+  }
+  /** Requires an OAuth 2.0 user-context access token for the given user. */
+  getBookmarks(userId, params = {}) {
+    return this.getPostPage(`/users/${encodeURIComponent(userId)}/bookmarks`, params, 1);
+  }
+  /** Requires an OAuth 2.0 user-context access token for the given user. */
+  getHomeTimeline(userId, params = {}) {
+    return this.getTimeline(`/users/${encodeURIComponent(userId)}/timelines/reverse_chronological`, params);
+  }
+  /** Requires an OAuth 2.0 user-context access token for the given user. */
+  getLikedPosts(userId, params = {}) {
+    return this.getPostPage(`/users/${encodeURIComponent(userId)}/liked_tweets`, params, 5);
+  }
+  getPostPage(path, params, minResults) {
+    const query = new URLSearchParams({
+      "tweet.fields": TWEET_FIELDS,
+      "user.fields": USER_FIELDS,
+      "media.fields": MEDIA_FIELDS,
+      expansions: POST_EXPANSIONS,
+      max_results: String(clampMaxResults(params.maxResults, minResults, 100, 10))
+    });
+    if (params.nextToken) query.set("pagination_token", params.nextToken);
+    return this.get(`${path}?${query}`);
   }
   getTimeline(path, params) {
     const query = new URLSearchParams({
@@ -21565,7 +21718,7 @@ function looksLikeUserId(value) {
 // src/index.ts
 var server = new McpServer({
   name: "x",
-  version: "0.1.1"
+  version: "0.2.0"
 });
 function getClient() {
   const bearerToken = resolveBearerToken();
@@ -21575,6 +21728,10 @@ function getClient() {
     );
   }
   return new XClient({ bearerToken });
+}
+async function getUserClient() {
+  const { accessToken, userId } = await getUserAccessToken();
+  return { client: new XClient({ bearerToken: accessToken }), userId };
 }
 function jsonResult(payload) {
   return {
@@ -21847,6 +22004,74 @@ server.tool(
     try {
       const result = await getClient().searchSpaces({ query, state, maxResults: max_results });
       return jsonResult(result);
+    } catch (error2) {
+      return errorResult(error2);
+    }
+  }
+);
+server.tool(
+  "get_bookmarks",
+  "List the authenticated user's bookmarked posts, most recent first. Requires a one-time login (npm run login in plugins/x/server).",
+  {
+    max_results: external_exports.number().int().min(1).max(100).optional().describe("Number of bookmarks to return (1-100). Defaults to 10."),
+    next_token: external_exports.string().optional().describe("Pagination token from a previous get_bookmarks response.")
+  },
+  async ({ max_results, next_token }) => {
+    try {
+      const { client, userId } = await getUserClient();
+      const result = await client.getBookmarks(userId, { maxResults: max_results, nextToken: next_token });
+      return jsonResult(formatPostList(result));
+    } catch (error2) {
+      return errorResult(error2);
+    }
+  }
+);
+server.tool(
+  "get_home_timeline",
+  "Get the authenticated user's home timeline (reverse-chronological posts from followed accounts). Requires a one-time login (npm run login in plugins/x/server).",
+  {
+    max_results: external_exports.number().int().min(1).max(100).optional().describe("Number of posts to return (1-100). Defaults to 10."),
+    next_token: external_exports.string().optional().describe("Pagination token from a previous get_home_timeline response."),
+    exclude_replies: external_exports.boolean().optional().describe("If true, omit replies"),
+    exclude_reposts: external_exports.boolean().optional().describe("If true, omit reposts"),
+    start_time: external_exports.string().optional().describe("ISO 8601 lower bound"),
+    end_time: external_exports.string().optional().describe("ISO 8601 upper bound"),
+    since_id: external_exports.string().optional(),
+    until_id: external_exports.string().optional()
+  },
+  async (args) => {
+    try {
+      const { client, userId } = await getUserClient();
+      const exclude = [];
+      if (args.exclude_replies) exclude.push("replies");
+      if (args.exclude_reposts) exclude.push("retweets");
+      const result = await client.getHomeTimeline(userId, {
+        maxResults: args.max_results,
+        nextToken: args.next_token,
+        startTime: args.start_time,
+        endTime: args.end_time,
+        sinceId: args.since_id,
+        untilId: args.until_id,
+        exclude: exclude.length ? exclude : void 0
+      });
+      return jsonResult(formatPostList(result));
+    } catch (error2) {
+      return errorResult(error2);
+    }
+  }
+);
+server.tool(
+  "get_liked_posts",
+  "List posts the authenticated user has liked, most recent first. Requires a one-time login (npm run login in plugins/x/server).",
+  {
+    max_results: external_exports.number().int().min(5).max(100).optional().describe("Number of posts to return (5-100). Defaults to 10."),
+    next_token: external_exports.string().optional().describe("Pagination token from a previous get_liked_posts response.")
+  },
+  async ({ max_results, next_token }) => {
+    try {
+      const { client, userId } = await getUserClient();
+      const result = await client.getLikedPosts(userId, { maxResults: max_results, nextToken: next_token });
+      return jsonResult(formatPostList(result));
     } catch (error2) {
       return errorResult(error2);
     }

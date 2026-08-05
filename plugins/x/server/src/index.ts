@@ -1,13 +1,14 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { getUserAccessToken } from "./auth.ts";
 import { XApiError, XClient, resolveBearerToken } from "./client.ts";
 import { formatPostList, formatUserList, sortPostsChronologically } from "./format.ts";
 import { looksLikeUserId, parsePostId, parsePostIds, parseUsername } from "./parse.ts";
 
 const server = new McpServer({
   name: "x",
-  version: "0.1.1",
+  version: "0.2.0",
 });
 
 function getClient(): XClient {
@@ -18,6 +19,12 @@ function getClient(): XClient {
     );
   }
   return new XClient({ bearerToken });
+}
+
+/** User-context client backed by the OAuth token store; refreshes silently. */
+async function getUserClient(): Promise<{ client: XClient; userId: string }> {
+  const { accessToken, userId } = await getUserAccessToken();
+  return { client: new XClient({ bearerToken: accessToken }), userId };
 }
 
 function jsonResult(payload: unknown) {
@@ -309,6 +316,77 @@ server.tool(
     try {
       const result = await getClient().searchSpaces({ query, state, maxResults: max_results });
       return jsonResult(result);
+    } catch (error) {
+      return errorResult(error);
+    }
+  }
+);
+
+server.tool(
+  "get_bookmarks",
+  "List the authenticated user's bookmarked posts, most recent first. Requires a one-time login (npm run login in plugins/x/server).",
+  {
+    max_results: z.number().int().min(1).max(100).optional().describe("Number of bookmarks to return (1-100). Defaults to 10."),
+    next_token: z.string().optional().describe("Pagination token from a previous get_bookmarks response."),
+  },
+  async ({ max_results, next_token }) => {
+    try {
+      const { client, userId } = await getUserClient();
+      const result = await client.getBookmarks(userId, { maxResults: max_results, nextToken: next_token });
+      return jsonResult(formatPostList(result));
+    } catch (error) {
+      return errorResult(error);
+    }
+  }
+);
+
+server.tool(
+  "get_home_timeline",
+  "Get the authenticated user's home timeline (reverse-chronological posts from followed accounts). Requires a one-time login (npm run login in plugins/x/server).",
+  {
+    max_results: z.number().int().min(1).max(100).optional().describe("Number of posts to return (1-100). Defaults to 10."),
+    next_token: z.string().optional().describe("Pagination token from a previous get_home_timeline response."),
+    exclude_replies: z.boolean().optional().describe("If true, omit replies"),
+    exclude_reposts: z.boolean().optional().describe("If true, omit reposts"),
+    start_time: z.string().optional().describe("ISO 8601 lower bound"),
+    end_time: z.string().optional().describe("ISO 8601 upper bound"),
+    since_id: z.string().optional(),
+    until_id: z.string().optional(),
+  },
+  async (args) => {
+    try {
+      const { client, userId } = await getUserClient();
+      const exclude: Array<"replies" | "retweets"> = [];
+      if (args.exclude_replies) exclude.push("replies");
+      if (args.exclude_reposts) exclude.push("retweets");
+      const result = await client.getHomeTimeline(userId, {
+        maxResults: args.max_results,
+        nextToken: args.next_token,
+        startTime: args.start_time,
+        endTime: args.end_time,
+        sinceId: args.since_id,
+        untilId: args.until_id,
+        exclude: exclude.length ? exclude : undefined,
+      });
+      return jsonResult(formatPostList(result));
+    } catch (error) {
+      return errorResult(error);
+    }
+  }
+);
+
+server.tool(
+  "get_liked_posts",
+  "List posts the authenticated user has liked, most recent first. Requires a one-time login (npm run login in plugins/x/server).",
+  {
+    max_results: z.number().int().min(5).max(100).optional().describe("Number of posts to return (5-100). Defaults to 10."),
+    next_token: z.string().optional().describe("Pagination token from a previous get_liked_posts response."),
+  },
+  async ({ max_results, next_token }) => {
+    try {
+      const { client, userId } = await getUserClient();
+      const result = await client.getLikedPosts(userId, { maxResults: max_results, nextToken: next_token });
+      return jsonResult(formatPostList(result));
     } catch (error) {
       return errorResult(error);
     }
