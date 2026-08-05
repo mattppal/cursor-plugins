@@ -1,8 +1,8 @@
 {
   "name": "x",
   "displayName": "X",
-  "version": "0.1.1",
-  "description": "Read-only access to X (Twitter) through the official v2 API. Search posts, look up users, read timelines, and inspect threads.",
+  "version": "0.2.0",
+  "description": "Read-only access to X (Twitter) through the official v2 API. Search posts, look up users, read timelines, and browse your own bookmarks, home feed, and likes.",
   "author": {
     "name": "Matt Palmer",
     "email": "59450879+mattppal@users.noreply.github.com"
@@ -21,6 +21,16 @@
         "type": "string",
         "title": "X Bearer Token",
         "description": "App-only bearer token from the X Developer Portal. Required for read-only v2 calls. Create one at https://developer.x.com/en/portal/dashboard."
+      },
+      "X_OAUTH_CLIENT_ID": {
+        "type": "string",
+        "title": "X OAuth Client ID",
+        "description": "Optional. OAuth 2.0 Client ID from the X Developer Portal (app type Web App, redirect URI http://127.0.0.1:8917/callback). Enables the start_login tool for bookmarks and personal feeds."
+      },
+      "X_OAUTH_CLIENT_SECRET": {
+        "type": "string",
+        "title": "X OAuth Client Secret",
+        "description": "Optional. OAuth 2.0 Client Secret paired with the client ID above."
       }
     },
     "required": ["X_BEARER_TOKEN"]

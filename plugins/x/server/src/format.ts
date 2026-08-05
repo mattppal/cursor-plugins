@@ -119,6 +119,14 @@ export function formatUserList(response: XListResponse<XUser>): FormattedListRes
   };
 }
 
+/** Case-insensitive match against post text and author handle/name. */
+export function postMatchesFilter(post: FormattedPost, filter: string): boolean {
+  const needle = filter.toLowerCase();
+  return [post.text, post.author?.username, post.author?.name].some((value) =>
+    value?.toLowerCase().includes(needle)
+  );
+}
+
 export function sortPostsChronologically<T extends { created_at?: string }>(posts: T[]): T[] {
   return [...posts].sort((left, right) => {
     const leftTime = left.created_at ? Date.parse(left.created_at) : 0;
