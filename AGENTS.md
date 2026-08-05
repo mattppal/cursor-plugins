@@ -10,7 +10,7 @@ This repo is a personal Cursor plugin marketplace. The only buildable product is
 - Lint-equivalent: there is no lint script; use `npx tsc --noEmit` (strict `tsconfig.json`) as the type-check gate.
 - Build: `npm run build` (esbuild bundles `src/index.ts` → `dist/index.js`). Note `dist/index.js` is committed and kept in sync; rebuild and commit it after changing server source. esbuild does **not** type-check, so run `tsc --noEmit` separately.
 - Dev run: `npm run dev` (`tsx src/index.ts`).
-- Repo-level template check: `node scripts/validate-template.mjs` (no dependencies needed). A "no hooks/hooks.json" warning is expected and harmless.
+- Repo-level manifest check: `node scripts/validate.mjs` (no dependencies needed). A "no hooks/hooks.json" warning is expected and harmless.
 
 ### Running the server (important gotcha)
 The server is a **stdio MCP server**, not an HTTP service — it binds no port. `npm run dev` / `npm start` just wait for a client and will appear to "hang"; that is normal. Drive it by writing newline-delimited JSON-RPC to stdin (`initialize` → `notifications/initialized` → `tools/list` / `tools/call`). In normal use Cursor launches it via `plugins/x/mcp.json` → `~/.cursor/plugins/local/x/server/launch.mjs`, which requires `dist/index.js` to exist (run `npm run build`).
