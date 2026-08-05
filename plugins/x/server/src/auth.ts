@@ -231,19 +231,14 @@ export async function getUserAccessToken(options: GetUserAccessTokenOptions = {}
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? Date.now;
 
-  const stored = await readTokenFile(filePath);
-  if (isFresh(stored, now())) {
-    return { accessToken: stored.access_token, userId: stored.user_id };
-  }
-
-  // Cursor can spawn several server instances against the same token file, and X
-  // rotates the refresh token on every use. Re-read just before refreshing in case
-  // another instance already rotated, and on auth failure check the file once more.
   const latest = await readTokenFile(filePath);
   if (isFresh(latest, now())) {
     return { accessToken: latest.access_token, userId: latest.user_id };
   }
 
+  // Cursor can spawn several server instances against the same token file, and X
+  // rotates the refresh token on every use. If our refresh loses that race, re-read
+  // the file and use the pair the winner persisted.
   try {
     const refreshed = await refreshAccessToken({
       clientId: latest.client_id,

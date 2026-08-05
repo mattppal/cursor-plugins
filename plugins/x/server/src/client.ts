@@ -7,6 +7,7 @@ import type {
   XRateLimit,
   XUser,
 } from "./types.ts";
+import { VERSION } from "./version.ts";
 
 const API_BASE = "https://api.x.com/2";
 
@@ -97,7 +98,7 @@ export class XClient {
   constructor(options: XClientOptions) {
     this.bearerToken = options.bearerToken;
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.userAgent = options.userAgent ?? "matt-cursor-plugins-x/0.2.0";
+    this.userAgent = options.userAgent ?? `matt-cursor-plugins-x/${VERSION}`;
   }
 
   searchPosts(params: SearchPostsParams): Promise<XListResponse<XPost>> {
@@ -264,8 +265,7 @@ export class XClient {
     if (params.startTime) query.set("start_time", params.startTime);
     if (params.endTime) query.set("end_time", params.endTime);
     if (params.exclude?.length) query.set("exclude", params.exclude.join(","));
-    const separator = path.includes("?") ? "&" : "?";
-    return this.get(`${path}${separator}${query}`);
+    return this.get(`${path}?${query}`);
   }
 
   private async get<T>(path: string): Promise<T> {

@@ -53,7 +53,7 @@ Append an entry to `.cursor-plugin/marketplace.json`:
 ## 4. Validate
 
 ```bash
-node scripts/validate-template.mjs
+node scripts/validate.mjs
 ```
 
 Fix every reported error before committing.

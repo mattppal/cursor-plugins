@@ -2,15 +2,16 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { defaultTokenFilePath, getUserAccessToken, readTokenFile } from "./auth.ts";
-import { normalizeScopes, startLoginFlow, type LoginFlow } from "./login-flow.ts";
 import { XApiError, XClient, resolveBearerToken } from "./client.ts";
 import { formatPostList, formatUserList, postMatchesFilter, sortPostsChronologically } from "./format.ts";
-import type { XListResponse, XPost } from "./types.ts";
+import { normalizeScopes, startLoginFlow, type LoginFlow } from "./login-flow.ts";
 import { looksLikeUserId, parsePostId, parsePostIds, parseUsername } from "./parse.ts";
+import type { XListResponse, XPost } from "./types.ts";
+import { VERSION } from "./version.ts";
 
 const server = new McpServer({
   name: "x",
-  version: "0.2.0",
+  version: VERSION,
 });
 
 function getClient(): XClient {
@@ -27,6 +28,17 @@ function getClient(): XClient {
 async function getUserClient(): Promise<{ client: XClient; userId: string }> {
   const { accessToken, userId } = await getUserAccessToken();
   return { client: new XClient({ bearerToken: accessToken }), userId };
+}
+
+/** Wraps a tool body: the resolved value becomes the JSON result, thrown errors become error results. */
+function handle<Args>(fn: (args: Args) => Promise<unknown> | unknown) {
+  return async (args: Args) => {
+    try {
+      return jsonResult(await fn(args));
+    } catch (error) {
+      return errorResult(error);
+    }
+  };
 }
 
 /** Bookmarks and likes have no server-side search, so scan pages and filter locally. */
@@ -118,9 +130,9 @@ server.tool(
     since_id: z.string().optional().describe("Return posts newer than this post ID"),
     until_id: z.string().optional().describe("Return posts older than this post ID"),
   },
-  async ({ query, max_results, next_token, sort_order, start_time, end_time, since_id, until_id }) => {
-    try {
-      const result = await getClient().searchPosts({
+  handle(async ({ query, max_results, next_token, sort_order, start_time, end_time, since_id, until_id }) =>
+    formatPostList(
+      await getClient().searchPosts({
         query,
         maxResults: max_results,
         nextToken: next_token,
@@ -129,12 +141,9 @@ server.tool(
         endTime: end_time,
         sinceId: since_id,
         untilId: until_id,
-      });
-      return jsonResult(formatPostList(result));
-    } catch (error) {
-      return errorResult(error);
-    }
-  }
+      })
+    )
+  )
 );
 
 server.tool(
@@ -147,15 +156,7 @@ server.tool(
       .max(100)
       .describe("Post IDs or status URLs, e.g. 1234567890 or https://x.com/user/status/1234567890"),
   },
-  async ({ ids }) => {
-    try {
-      const postIds = parsePostIds(ids);
-      const result = await getClient().getPosts(postIds);
-      return jsonResult(formatPostList(result));
-    } catch (error) {
-      return errorResult(error);
-    }
-  }
+  handle(async ({ ids }) => formatPostList(await getClient().getPosts(parsePostIds(ids))))
 );
 
 server.tool(
@@ -164,17 +165,13 @@ server.tool(
   {
     username_or_id: z.string().min(1).describe("Username such as openai or @openai, or a numeric user ID"),
   },
-  async ({ username_or_id }) => {
-    try {
-      const client = getClient();
-      const result = looksLikeUserId(username_or_id)
-        ? await client.getUsersByIds([username_or_id.trim()])
-        : await client.getUserByUsername(parseUsername(username_or_id));
-      return jsonResult(formatUserList(result));
-    } catch (error) {
-      return errorResult(error);
-    }
-  }
+  handle(async ({ username_or_id }) => {
+    const client = getClient();
+    const result = looksLikeUserId(username_or_id)
+      ? await client.getUsersByIds([username_or_id.trim()])
+      : await client.getUserByUsername(parseUsername(username_or_id));
+    return formatUserList(result);
+  })
 );
 
 server.tool(
@@ -184,29 +181,25 @@ server.tool(
     usernames: z.array(z.string().min(1)).max(100).optional().describe("Usernames, with or without @"),
     ids: z.array(z.string().min(1)).max(100).optional().describe("Numeric user IDs"),
   },
-  async ({ usernames, ids }) => {
-    try {
-      if ((!usernames || usernames.length === 0) && (!ids || ids.length === 0)) {
-        throw new Error("Provide at least one username or user ID.");
-      }
-      const client = getClient();
-      const users = [];
-      const errors = [];
-      if (usernames?.length) {
-        const result = await client.getUsersByUsernames(usernames.map(parseUsername));
-        users.push(...formatUserList(result).data);
-        if (result.errors) errors.push(...result.errors);
-      }
-      if (ids?.length) {
-        const result = await client.getUsersByIds(ids);
-        users.push(...formatUserList(result).data);
-        if (result.errors) errors.push(...result.errors);
-      }
-      return jsonResult({ data: users, errors: errors.length ? errors : undefined });
-    } catch (error) {
-      return errorResult(error);
+  handle(async ({ usernames, ids }) => {
+    if ((!usernames || usernames.length === 0) && (!ids || ids.length === 0)) {
+      throw new Error("Provide at least one username or user ID.");
     }
-  }
+    const client = getClient();
+    const users = [];
+    const errors = [];
+    if (usernames?.length) {
+      const result = await client.getUsersByUsernames(usernames.map(parseUsername));
+      users.push(...formatUserList(result).data);
+      if (result.errors) errors.push(...result.errors);
+    }
+    if (ids?.length) {
+      const result = await client.getUsersByIds(ids);
+      users.push(...formatUserList(result).data);
+      if (result.errors) errors.push(...result.errors);
+    }
+    return { data: users, errors: errors.length ? errors : undefined };
+  })
 );
 
 server.tool(
@@ -223,14 +216,14 @@ server.tool(
     since_id: z.string().optional(),
     until_id: z.string().optional(),
   },
-  async (args) => {
-    try {
-      const client = getClient();
-      const userId = await resolveUserId(client, args.username_or_id);
-      const exclude: Array<"replies" | "retweets"> = [];
-      if (args.exclude_replies) exclude.push("replies");
-      if (args.exclude_reposts) exclude.push("retweets");
-      const result = await client.getUserPosts(userId, {
+  handle(async (args) => {
+    const client = getClient();
+    const userId = await resolveUserId(client, args.username_or_id);
+    const exclude: Array<"replies" | "retweets"> = [];
+    if (args.exclude_replies) exclude.push("replies");
+    if (args.exclude_reposts) exclude.push("retweets");
+    return formatPostList(
+      await client.getUserPosts(userId, {
         maxResults: args.max_results,
         nextToken: args.next_token,
         startTime: args.start_time,
@@ -238,12 +231,9 @@ server.tool(
         sinceId: args.since_id,
         untilId: args.until_id,
         exclude: exclude.length ? exclude : undefined,
-      });
-      return jsonResult(formatPostList(result));
-    } catch (error) {
-      return errorResult(error);
-    }
-  }
+      })
+    );
+  })
 );
 
 server.tool(
@@ -258,23 +248,20 @@ server.tool(
     since_id: z.string().optional(),
     until_id: z.string().optional(),
   },
-  async (args) => {
-    try {
-      const client = getClient();
-      const userId = await resolveUserId(client, args.username_or_id);
-      const result = await client.getUserMentions(userId, {
+  handle(async (args) => {
+    const client = getClient();
+    const userId = await resolveUserId(client, args.username_or_id);
+    return formatPostList(
+      await client.getUserMentions(userId, {
         maxResults: args.max_results,
         nextToken: args.next_token,
         startTime: args.start_time,
         endTime: args.end_time,
         sinceId: args.since_id,
         untilId: args.until_id,
-      });
-      return jsonResult(formatPostList(result));
-    } catch (error) {
-      return errorResult(error);
-    }
-  }
+      })
+    );
+  })
 );
 
 server.tool(
@@ -284,32 +271,28 @@ server.tool(
     id_or_url: z.string().min(1).describe("Post ID or x.com / twitter.com status URL"),
     max_results: z.number().int().min(10).max(100).optional().describe("Max thread posts to return (10-100). Defaults to 50."),
   },
-  async ({ id_or_url, max_results }) => {
-    try {
-      const client = getClient();
-      const postId = parsePostId(id_or_url);
-      const lookup = await client.getPosts([postId]);
-      const root = Array.isArray(lookup.data) ? lookup.data[0] : lookup.data;
-      if (!root) {
-        throw new Error(`Post ${postId} was not found or is not available on your API plan.`);
-      }
-      const conversationId = root.conversation_id ?? postId;
-      const search = await client.searchPosts({
-        query: `conversation_id:${conversationId}`,
-        maxResults: max_results ?? 50,
-        sortOrder: "recency",
-      });
-      const formatted = formatPostList(search);
-      formatted.data = sortPostsChronologically(formatted.data);
-      return jsonResult({
-        conversation_id: conversationId,
-        root_post_id: postId,
-        ...formatted,
-      });
-    } catch (error) {
-      return errorResult(error);
+  handle(async ({ id_or_url, max_results }) => {
+    const client = getClient();
+    const postId = parsePostId(id_or_url);
+    const lookup = await client.getPosts([postId]);
+    const root = Array.isArray(lookup.data) ? lookup.data[0] : lookup.data;
+    if (!root) {
+      throw new Error(`Post ${postId} was not found or is not available on your API plan.`);
     }
-  }
+    const conversationId = root.conversation_id ?? postId;
+    const search = await client.searchPosts({
+      query: `conversation_id:${conversationId}`,
+      maxResults: max_results ?? 50,
+      sortOrder: "recency",
+    });
+    const formatted = formatPostList(search);
+    formatted.data = sortPostsChronologically(formatted.data);
+    return {
+      conversation_id: conversationId,
+      root_post_id: postId,
+      ...formatted,
+    };
+  })
 );
 
 server.tool(
@@ -320,17 +303,14 @@ server.tool(
     max_results: z.number().int().min(10).max(100).optional(),
     next_token: z.string().optional(),
   },
-  async ({ id_or_url, max_results, next_token }) => {
-    try {
-      const result = await getClient().getQuotePosts(parsePostId(id_or_url), {
+  handle(async ({ id_or_url, max_results, next_token }) =>
+    formatPostList(
+      await getClient().getQuotePosts(parsePostId(id_or_url), {
         maxResults: max_results,
         nextToken: next_token,
-      });
-      return jsonResult(formatPostList(result));
-    } catch (error) {
-      return errorResult(error);
-    }
-  }
+      })
+    )
+  )
 );
 
 server.tool(
@@ -341,14 +321,7 @@ server.tool(
     state: z.enum(["live", "scheduled", "all"]).optional().describe("Filter by Space state. Defaults to all live+scheduled depending on API defaults."),
     max_results: z.number().int().min(1).max(100).optional(),
   },
-  async ({ query, state, max_results }) => {
-    try {
-      const result = await getClient().searchSpaces({ query, state, maxResults: max_results });
-      return jsonResult(result);
-    } catch (error) {
-      return errorResult(error);
-    }
-  }
+  handle(({ query, state, max_results }) => getClient().searchSpaces({ query, state, maxResults: max_results }))
 );
 
 interface PendingLogin {
@@ -371,58 +344,54 @@ server.tool(
         "Space-separated scope override, e.g. 'tweet.read users.read bookmark.read like.read timeline.read offline.access'. Defaults to the standard read scopes."
       ),
   },
-  async ({ scopes }) => {
-    try {
-      const clientId = process.env.X_OAUTH_CLIENT_ID?.trim();
-      const clientSecret = process.env.X_OAUTH_CLIENT_SECRET?.trim();
-      if (!clientId || !clientSecret) {
-        throw new Error(
-          "Missing OAuth client credentials. Ask the user to set X OAuth Client ID and X OAuth Client Secret in Cursor Settings → Plugins → X → Configure (from the X Developer Portal, app type Web App, redirect URI http://127.0.0.1:8917/callback), then reload and retry. Alternative: run `cd plugins/x/server && npm run login` in a terminal."
-        );
-      }
-      if (pendingLogin?.status === "pending") {
-        return jsonResult({
-          status: "pending",
-          authorize_url: pendingLogin.flow.authorizeUrl,
-          message: "A login is already waiting. Ask the user to open this link and approve access.",
-        });
-      }
-
-      const flow = await startLoginFlow({
-        clientId,
-        clientSecret,
-        scopes: scopes ? normalizeScopes(scopes.split(/[\s,]+/).filter(Boolean)) : undefined,
-        openBrowser: false,
-      });
-      const entry: PendingLogin = { flow, status: "pending" };
-      pendingLogin = entry;
-      flow.completion.then(
-        (stored) => {
-          entry.status = "done";
-          entry.username = stored.username;
-        },
-        (error) => {
-          entry.status = "error";
-          entry.error = error instanceof Error ? error.message : String(error);
-        }
+  handle(async ({ scopes }) => {
+    const clientId = process.env.X_OAUTH_CLIENT_ID?.trim();
+    const clientSecret = process.env.X_OAUTH_CLIENT_SECRET?.trim();
+    if (!clientId || !clientSecret) {
+      throw new Error(
+        "Missing OAuth client credentials. Ask the user to set X OAuth Client ID and X OAuth Client Secret in Cursor Settings → Plugins → X → Configure (from the X Developer Portal, app type Web App, redirect URI http://127.0.0.1:8917/callback), then reload and retry. Alternative: run `cd plugins/x/server && npm run login` in a terminal."
       );
-
-      return jsonResult({
-        status: "pending",
-        authorize_url: flow.authorizeUrl,
-        message:
-          "Show this link to the user and ask them to open it and approve access. Then confirm with get_auth_status and retry the personal tool. The link expires after 5 minutes.",
-      });
-    } catch (error) {
-      return errorResult(error);
     }
-  }
+    if (pendingLogin?.status === "pending") {
+      return {
+        status: "pending",
+        authorize_url: pendingLogin.flow.authorizeUrl,
+        message: "A login is already waiting. Ask the user to open this link and approve access.",
+      };
+    }
+
+    const flow = await startLoginFlow({
+      clientId,
+      clientSecret,
+      scopes: scopes ? normalizeScopes(scopes.split(/[\s,]+/).filter(Boolean)) : undefined,
+      openBrowser: false,
+    });
+    const entry: PendingLogin = { flow, status: "pending" };
+    pendingLogin = entry;
+    flow.completion.then(
+      (stored) => {
+        entry.status = "done";
+        entry.username = stored.username;
+      },
+      (error) => {
+        entry.status = "error";
+        entry.error = error instanceof Error ? error.message : String(error);
+      }
+    );
+
+    return {
+      status: "pending",
+      authorize_url: flow.authorizeUrl,
+      message:
+        "Show this link to the user and ask them to open it and approve access. Then confirm with get_auth_status and retry the personal tool. The link expires after 5 minutes.",
+    };
+  })
 );
 
 server.tool(
   "get_auth_status",
   "Report X auth state: whether the app-only bearer token is set, whether a user login exists (for bookmarks and personal feeds), and the progress of any login started with start_login.",
-  async () => {
+  handle(async () => {
     const status: Record<string, unknown> = {
       app_bearer_token_configured: Boolean(resolveBearerToken()),
     };
@@ -445,41 +414,35 @@ server.tool(
         error: pendingLogin.error,
       };
     }
-    return jsonResult(status);
-  }
+    return status;
+  })
 );
 
 server.tool(
   "get_bookmarks",
-  "List the authenticated user's bookmarked posts, most recent first. Pass filter to find a specific saved post; the X API has no bookmark search, so the server scans up to 500 recent bookmarks and matches text and author locally. Requires a one-time login (npm run login in plugins/x/server).",
+  "List the authenticated user's bookmarked posts, most recent first. Pass filter to find a specific saved post; the X API has no bookmark search, so the server scans up to 500 recent bookmarks and matches text and author locally. Requires a one-time login (start_login tool, or npm run login in plugins/x/server).",
   {
     max_results: z.number().int().min(1).max(100).optional().describe("Number of bookmarks (or filter matches) to return (1-100). Defaults to 10."),
     next_token: z.string().optional().describe("Pagination token from a previous get_bookmarks response."),
     filter: z.string().optional().describe("Case-insensitive substring matched against post text and author handle/name, e.g. img2threejs"),
   },
-  async ({ max_results, next_token, filter }) => {
-    try {
-      const { client, userId } = await getUserClient();
-      if (filter) {
-        const result = await collectFilteredPosts(
-          (token) => client.getBookmarks(userId, { maxResults: 100, nextToken: token }),
-          filter,
-          max_results ?? 10,
-          next_token
-        );
-        return jsonResult(result);
-      }
-      const result = await client.getBookmarks(userId, { maxResults: max_results, nextToken: next_token });
-      return jsonResult(formatPostList(result));
-    } catch (error) {
-      return errorResult(error);
+  handle(async ({ max_results, next_token, filter }) => {
+    const { client, userId } = await getUserClient();
+    if (filter) {
+      return collectFilteredPosts(
+        (token) => client.getBookmarks(userId, { maxResults: 100, nextToken: token }),
+        filter,
+        max_results ?? 10,
+        next_token
+      );
     }
-  }
+    return formatPostList(await client.getBookmarks(userId, { maxResults: max_results, nextToken: next_token }));
+  })
 );
 
 server.tool(
   "get_home_timeline",
-  "Get the authenticated user's home timeline (reverse-chronological posts from followed accounts). Requires a one-time login (npm run login in plugins/x/server).",
+  "Get the authenticated user's home timeline (reverse-chronological posts from followed accounts). Requires a one-time login (start_login tool, or npm run login in plugins/x/server).",
   {
     max_results: z.number().int().min(1).max(100).optional().describe("Number of posts to return (1-100). Defaults to 10."),
     next_token: z.string().optional().describe("Pagination token from a previous get_home_timeline response."),
@@ -490,13 +453,13 @@ server.tool(
     since_id: z.string().optional(),
     until_id: z.string().optional(),
   },
-  async (args) => {
-    try {
-      const { client, userId } = await getUserClient();
-      const exclude: Array<"replies" | "retweets"> = [];
-      if (args.exclude_replies) exclude.push("replies");
-      if (args.exclude_reposts) exclude.push("retweets");
-      const result = await client.getHomeTimeline(userId, {
+  handle(async (args) => {
+    const { client, userId } = await getUserClient();
+    const exclude: Array<"replies" | "retweets"> = [];
+    if (args.exclude_replies) exclude.push("replies");
+    if (args.exclude_reposts) exclude.push("retweets");
+    return formatPostList(
+      await client.getHomeTimeline(userId, {
         maxResults: args.max_results,
         nextToken: args.next_token,
         startTime: args.start_time,
@@ -504,52 +467,37 @@ server.tool(
         sinceId: args.since_id,
         untilId: args.until_id,
         exclude: exclude.length ? exclude : undefined,
-      });
-      return jsonResult(formatPostList(result));
-    } catch (error) {
-      return errorResult(error);
-    }
-  }
+      })
+    );
+  })
 );
 
 server.tool(
   "get_liked_posts",
-  "List posts the authenticated user has liked, most recent first. Pass filter to find a specific liked post; the X API has no like search, so the server scans up to 500 recent likes and matches text and author locally. Requires a one-time login (npm run login in plugins/x/server).",
+  "List posts the authenticated user has liked, most recent first. Pass filter to find a specific liked post; the X API has no like search, so the server scans up to 500 recent likes and matches text and author locally. Requires a one-time login (start_login tool, or npm run login in plugins/x/server).",
   {
     max_results: z.number().int().min(5).max(100).optional().describe("Number of posts (or filter matches) to return (5-100). Defaults to 10."),
     next_token: z.string().optional().describe("Pagination token from a previous get_liked_posts response."),
     filter: z.string().optional().describe("Case-insensitive substring matched against post text and author handle/name"),
   },
-  async ({ max_results, next_token, filter }) => {
-    try {
-      const { client, userId } = await getUserClient();
-      if (filter) {
-        const result = await collectFilteredPosts(
-          (token) => client.getLikedPosts(userId, { maxResults: 100, nextToken: token }),
-          filter,
-          max_results ?? 10,
-          next_token
-        );
-        return jsonResult(result);
-      }
-      const result = await client.getLikedPosts(userId, { maxResults: max_results, nextToken: next_token });
-      return jsonResult(formatPostList(result));
-    } catch (error) {
-      return errorResult(error);
+  handle(async ({ max_results, next_token, filter }) => {
+    const { client, userId } = await getUserClient();
+    if (filter) {
+      return collectFilteredPosts(
+        (token) => client.getLikedPosts(userId, { maxResults: 100, nextToken: token }),
+        filter,
+        max_results ?? 10,
+        next_token
+      );
     }
-  }
+    return formatPostList(await client.getLikedPosts(userId, { maxResults: max_results, nextToken: next_token }));
+  })
 );
 
 server.tool(
   "get_api_usage",
   "Show recent project usage for post reads. Check this before broad searches if monthly quota is a concern.",
-  async () => {
-    try {
-      return jsonResult(await getClient().getUsage());
-    } catch (error) {
-      return errorResult(error);
-    }
-  }
+  handle(() => getClient().getUsage())
 );
 
 async function main() {

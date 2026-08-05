@@ -4,9 +4,6 @@
   "version": "0.2.0",
   "type": "module",
   "description": "Read-only MCP server for the X (Twitter) API v2",
-  "bin": {
-    "x-mcp": "./dist/index.js"
-  },
   "scripts": {
     "build": "esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --banner:js=\"#!/usr/bin/env node\"",
     "test": "tsx --test src/*.test.ts",

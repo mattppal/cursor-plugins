@@ -6,7 +6,7 @@ Personal [Cursor](https://cursor.com) plugin marketplace, based on the [official
 
 | Plugin | Description |
 | --- | --- |
-| [`x`](plugins/x) | Read-only X (Twitter) API: search posts, look up users, and browse public content |
+| [`x`](plugins/x) | Read-only X (Twitter) API: search posts, look up users, and read your bookmarks and feeds |
 
 ## Install
 
@@ -30,5 +30,5 @@ Reload the window (**Developer: Reload Window**). Set **X Bearer Token** under *
 See [`docs/add-a-plugin.md`](docs/add-a-plugin.md). Validate with:
 
 ```bash
-node scripts/validate-template.mjs
+node scripts/validate.mjs
 ```
