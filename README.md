@@ -6,7 +6,7 @@ Personal [Cursor](https://cursor.com) plugin marketplace, based on the [official
 
 | Plugin | Description |
 | --- | --- |
-| [`x`](plugins/x) | Read-only X (Twitter) API: search posts, look up users, and read your bookmarks and feeds |
+| [`x`](plugins/x) | Read-only X (Twitter) API: search posts, look up users, and browse public timelines |
 
 ## Install
 

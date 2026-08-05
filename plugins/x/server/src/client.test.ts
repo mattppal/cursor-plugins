@@ -81,28 +81,6 @@ describe("XClient", () => {
     );
   });
 
-  it("requests user-context endpoints with the expected paths", async () => {
-    const urls: string[] = [];
-    const client = new XClient({
-      bearerToken: "user-access-token",
-      fetchImpl: async (input) => {
-        urls.push(String(input));
-        return jsonResponse(200, { data: [] });
-      },
-    });
-
-    await client.getBookmarks("42", { maxResults: 5, nextToken: "tok" });
-    await client.getHomeTimeline("42", { maxResults: 20, exclude: ["replies"] });
-    await client.getLikedPosts("42");
-
-    assert.match(urls[0]!, /\/users\/42\/bookmarks\?/);
-    assert.match(urls[0]!, /max_results=5/);
-    assert.match(urls[0]!, /pagination_token=tok/);
-    assert.match(urls[1]!, /\/users\/42\/timelines\/reverse_chronological\?/);
-    assert.match(urls[1]!, /exclude=replies/);
-    assert.match(urls[2]!, /\/users\/42\/liked_tweets\?/);
-  });
-
   it("looks up posts by comma-separated IDs", async () => {
     let url = "";
     const client = new XClient({
