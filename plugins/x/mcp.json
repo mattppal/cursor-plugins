@@ -7,9 +7,7 @@
         "f=\"$HOME/.cursor/plugins/local/x/server/launch.mjs\"; [ -f \"$f\" ] || f=\"$HOME/Developer/git-repos/cursor-plugins/plugins/x/server/launch.mjs\"; exec node \"$f\""
       ],
       "env": {
-        "X_BEARER_TOKEN": "${X_BEARER_TOKEN}",
-        "X_OAUTH_CLIENT_ID": "${X_OAUTH_CLIENT_ID}",
-        "X_OAUTH_CLIENT_SECRET": "${X_OAUTH_CLIENT_SECRET}"
+        "X_BEARER_TOKEN": "${X_BEARER_TOKEN}"
       }
     }
   }

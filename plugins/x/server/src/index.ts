@@ -1,12 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { defaultTokenFilePath, getUserAccessToken, readTokenFile } from "./auth.ts";
 import { XApiError, XClient, resolveBearerToken } from "./client.ts";
-import { formatPostList, formatUserList, postMatchesFilter, sortPostsChronologically } from "./format.ts";
-import { normalizeScopes, startLoginFlow, type LoginFlow } from "./login-flow.ts";
+import { formatPostList, formatUserList, sortPostsChronologically } from "./format.ts";
 import { looksLikeUserId, parsePostId, parsePostIds, parseUsername } from "./parse.ts";
-import type { XListResponse, XPost } from "./types.ts";
 import { VERSION } from "./version.ts";
 
 const server = new McpServer({
@@ -24,12 +21,6 @@ function getClient(): XClient {
   return new XClient({ bearerToken });
 }
 
-/** User-context client backed by the OAuth token store; refreshes silently. */
-async function getUserClient(): Promise<{ client: XClient; userId: string }> {
-  const { accessToken, userId } = await getUserAccessToken();
-  return { client: new XClient({ bearerToken: accessToken }), userId };
-}
-
 /** Wraps a tool body: the resolved value becomes the JSON result, thrown errors become error results. */
 function handle<Args>(fn: (args: Args) => Promise<unknown> | unknown) {
   return async (args: Args) => {
@@ -38,33 +29,6 @@ function handle<Args>(fn: (args: Args) => Promise<unknown> | unknown) {
     } catch (error) {
       return errorResult(error);
     }
-  };
-}
-
-/** Bookmarks and likes have no server-side search, so scan pages and filter locally. */
-const MAX_FILTER_PAGES = 5;
-
-async function collectFilteredPosts(
-  fetchPage: (nextToken?: string) => Promise<XListResponse<XPost>>,
-  filter: string,
-  wanted: number,
-  startToken?: string
-) {
-  const matches = [];
-  let nextToken = startToken;
-  let scanned = 0;
-  for (let page = 0; page < MAX_FILTER_PAGES; page += 1) {
-    const result = formatPostList(await fetchPage(nextToken));
-    scanned += result.data.length;
-    matches.push(...result.data.filter((post) => postMatchesFilter(post, filter)));
-    nextToken = result.meta?.next_token;
-    if (!nextToken || matches.length >= wanted) break;
-  }
-  return {
-    data: matches.slice(0, wanted),
-    filter,
-    scanned,
-    next_token: nextToken,
   };
 }
 
@@ -322,176 +286,6 @@ server.tool(
     max_results: z.number().int().min(1).max(100).optional(),
   },
   handle(({ query, state, max_results }) => getClient().searchSpaces({ query, state, maxResults: max_results }))
-);
-
-interface PendingLogin {
-  flow: LoginFlow;
-  status: "pending" | "done" | "error";
-  username?: string;
-  error?: string;
-}
-
-let pendingLogin: PendingLogin | undefined;
-
-server.tool(
-  "start_login",
-  "Start the one-time X account login for get_bookmarks, get_home_timeline, and get_liked_posts. Returns an authorize URL immediately; show it to the user as a clickable link and ask them to approve in the browser. The login completes in the background — verify with get_auth_status, then retry the personal tool. Requires the X OAuth Client ID and Client Secret to be set in plugin Configure.",
-  {
-    scopes: z
-      .string()
-      .optional()
-      .describe(
-        "Space-separated scope override, e.g. 'tweet.read users.read bookmark.read like.read timeline.read offline.access'. Defaults to the standard read scopes."
-      ),
-  },
-  handle(async ({ scopes }) => {
-    const clientId = process.env.X_OAUTH_CLIENT_ID?.trim();
-    const clientSecret = process.env.X_OAUTH_CLIENT_SECRET?.trim();
-    if (!clientId || !clientSecret) {
-      throw new Error(
-        "Missing OAuth client credentials. Ask the user to set X OAuth Client ID and X OAuth Client Secret in Cursor Settings → Plugins → X → Configure (from the X Developer Portal, app type Web App, redirect URI http://127.0.0.1:8917/callback), then reload and retry. Alternative: run `cd plugins/x/server && npm run login` in a terminal."
-      );
-    }
-    if (pendingLogin?.status === "pending") {
-      return {
-        status: "pending",
-        authorize_url: pendingLogin.flow.authorizeUrl,
-        message: "A login is already waiting. Ask the user to open this link and approve access.",
-      };
-    }
-
-    const flow = await startLoginFlow({
-      clientId,
-      clientSecret,
-      scopes: scopes ? normalizeScopes(scopes.split(/[\s,]+/).filter(Boolean)) : undefined,
-      openBrowser: false,
-    });
-    const entry: PendingLogin = { flow, status: "pending" };
-    pendingLogin = entry;
-    flow.completion.then(
-      (stored) => {
-        entry.status = "done";
-        entry.username = stored.username;
-      },
-      (error) => {
-        entry.status = "error";
-        entry.error = error instanceof Error ? error.message : String(error);
-      }
-    );
-
-    return {
-      status: "pending",
-      authorize_url: flow.authorizeUrl,
-      message:
-        "Show this link to the user and ask them to open it and approve access. Then confirm with get_auth_status and retry the personal tool. The link expires after 5 minutes.",
-    };
-  })
-);
-
-server.tool(
-  "get_auth_status",
-  "Report X auth state: whether the app-only bearer token is set, whether a user login exists (for bookmarks and personal feeds), and the progress of any login started with start_login.",
-  handle(async () => {
-    const status: Record<string, unknown> = {
-      app_bearer_token_configured: Boolean(resolveBearerToken()),
-    };
-    try {
-      const tokens = await readTokenFile();
-      status.user_logged_in = true;
-      status.username = tokens.username;
-      status.user_id = tokens.user_id;
-      status.scopes = tokens.scopes;
-      status.access_token_expires_at = new Date(tokens.expires_at).toISOString();
-    } catch (error) {
-      status.user_logged_in = false;
-      status.detail = error instanceof Error ? error.message : String(error);
-      status.token_file = defaultTokenFilePath();
-    }
-    if (pendingLogin) {
-      status.login_in_progress = {
-        status: pendingLogin.status,
-        username: pendingLogin.username,
-        error: pendingLogin.error,
-      };
-    }
-    return status;
-  })
-);
-
-server.tool(
-  "get_bookmarks",
-  "List the authenticated user's bookmarked posts, most recent first. Pass filter to find a specific saved post; the X API has no bookmark search, so the server scans up to 500 recent bookmarks and matches text and author locally. Requires a one-time login (start_login tool, or npm run login in plugins/x/server).",
-  {
-    max_results: z.number().int().min(1).max(100).optional().describe("Number of bookmarks (or filter matches) to return (1-100). Defaults to 10."),
-    next_token: z.string().optional().describe("Pagination token from a previous get_bookmarks response."),
-    filter: z.string().optional().describe("Case-insensitive substring matched against post text and author handle/name, e.g. img2threejs"),
-  },
-  handle(async ({ max_results, next_token, filter }) => {
-    const { client, userId } = await getUserClient();
-    if (filter) {
-      return collectFilteredPosts(
-        (token) => client.getBookmarks(userId, { maxResults: 100, nextToken: token }),
-        filter,
-        max_results ?? 10,
-        next_token
-      );
-    }
-    return formatPostList(await client.getBookmarks(userId, { maxResults: max_results, nextToken: next_token }));
-  })
-);
-
-server.tool(
-  "get_home_timeline",
-  "Get the authenticated user's home timeline (reverse-chronological posts from followed accounts). Requires a one-time login (start_login tool, or npm run login in plugins/x/server).",
-  {
-    max_results: z.number().int().min(1).max(100).optional().describe("Number of posts to return (1-100). Defaults to 10."),
-    next_token: z.string().optional().describe("Pagination token from a previous get_home_timeline response."),
-    exclude_replies: z.boolean().optional().describe("If true, omit replies"),
-    exclude_reposts: z.boolean().optional().describe("If true, omit reposts"),
-    start_time: z.string().optional().describe("ISO 8601 lower bound"),
-    end_time: z.string().optional().describe("ISO 8601 upper bound"),
-    since_id: z.string().optional(),
-    until_id: z.string().optional(),
-  },
-  handle(async (args) => {
-    const { client, userId } = await getUserClient();
-    const exclude: Array<"replies" | "retweets"> = [];
-    if (args.exclude_replies) exclude.push("replies");
-    if (args.exclude_reposts) exclude.push("retweets");
-    return formatPostList(
-      await client.getHomeTimeline(userId, {
-        maxResults: args.max_results,
-        nextToken: args.next_token,
-        startTime: args.start_time,
-        endTime: args.end_time,
-        sinceId: args.since_id,
-        untilId: args.until_id,
-        exclude: exclude.length ? exclude : undefined,
-      })
-    );
-  })
-);
-
-server.tool(
-  "get_liked_posts",
-  "List posts the authenticated user has liked, most recent first. Pass filter to find a specific liked post; the X API has no like search, so the server scans up to 500 recent likes and matches text and author locally. Requires a one-time login (start_login tool, or npm run login in plugins/x/server).",
-  {
-    max_results: z.number().int().min(5).max(100).optional().describe("Number of posts (or filter matches) to return (5-100). Defaults to 10."),
-    next_token: z.string().optional().describe("Pagination token from a previous get_liked_posts response."),
-    filter: z.string().optional().describe("Case-insensitive substring matched against post text and author handle/name"),
-  },
-  handle(async ({ max_results, next_token, filter }) => {
-    const { client, userId } = await getUserClient();
-    if (filter) {
-      return collectFilteredPosts(
-        (token) => client.getLikedPosts(userId, { maxResults: 100, nextToken: token }),
-        filter,
-        max_results ?? 10,
-        next_token
-      );
-    }
-    return formatPostList(await client.getLikedPosts(userId, { maxResults: max_results, nextToken: next_token }));
-  })
 );
 
 server.tool(

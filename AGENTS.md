@@ -16,6 +16,6 @@ This repo is a personal Cursor plugin marketplace. The only buildable product is
 The server is a **stdio MCP server**, not an HTTP service — it binds no port. `npm run dev` / `npm start` just wait for a client and will appear to "hang"; that is normal. Drive it by writing newline-delimited JSON-RPC to stdin (`initialize` → `notifications/initialized` → `tools/list` / `tools/call`). In normal use Cursor launches it via `plugins/x/mcp.json` → `~/.cursor/plugins/local/x/server/launch.mjs`, which requires `dist/index.js` to exist (run `npm run build`).
 
 ### Secrets / live API
-- `get_auth_status` and the MCP handshake work with no secrets.
-- Live tools (`search_posts`, `get_user`, etc.) need `X_BEARER_TOKEN` in the environment.
-- Personal-feed tools (`get_bookmarks`, `get_home_timeline`, `get_liked_posts`) need an OAuth user login (`X_OAUTH_CLIENT_ID` + `X_OAUTH_CLIENT_SECRET`, then `npm run login` or the `start_login` tool). Tokens are stored at `~/.cursor/x-plugin/tokens.json`.
+- The MCP handshake works with no secrets.
+- Live tools (`search_posts`, `get_user`, etc.) need `X_BEARER_TOKEN` in the environment (plugin Configure → X Bearer Token).
+

@@ -6,15 +6,15 @@
   },
   "metadata": {
     "description": "Personal Cursor plugins marketplace",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "pluginRoot": "plugins"
   },
   "plugins": [
     {
       "name": "x",
       "source": "x",
-      "version": "0.2.0",
-      "description": "Read-only X (Twitter) API. Search posts, look up users, browse timelines, and read your bookmarks and feeds."
+      "version": "0.3.0",
+      "description": "Read-only X (Twitter) API. Search posts, look up users, and browse public timelines."
     }
   ]
 }
