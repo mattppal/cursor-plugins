@@ -54,9 +54,9 @@ If `get_home_timeline` returns 403 on your plan, retry the login with an extra s
 | `get_thread` | Conversation around a post |
 | `get_quote_posts` | Quotes of a post |
 | `search_spaces` | Search Spaces |
-| `get_bookmarks` | Your bookmarked posts (requires login) |
+| `get_bookmarks` | Your bookmarked posts, with a `filter` keyword search (requires login) |
 | `get_home_timeline` | Your reverse-chronological home feed (requires login) |
-| `get_liked_posts` | Posts you have liked (requires login) |
+| `get_liked_posts` | Posts you have liked, with a `filter` keyword search (requires login) |
 | `get_api_usage` | Project post-read usage |
 
 ## Develop the MCP server

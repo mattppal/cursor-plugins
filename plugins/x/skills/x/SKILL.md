@@ -43,7 +43,7 @@ The script asks for the app's OAuth 2.0 Client ID and Secret, opens a browser to
 
 Timeline tools accept usernames. Resolve `@username` with `get_user` only when a later call needs the numeric ID.
 
-When the user asks about something they saved, bookmarked, or "liked a while back", check `get_bookmarks` or `get_liked_posts` before searching: `search_posts` only covers the last 7 days.
+When the user asks about something they saved, bookmarked, or "liked a while back", check `get_bookmarks` or `get_liked_posts` before searching: `search_posts` only covers the last 7 days. To find a specific post, pass `filter` with a keyword or author handle instead of paging manually; the server scans up to 500 recent items per call and returns `next_token` to continue.
 
 ## Search operators
 

@@ -21673,6 +21673,12 @@ function formatUserList(response) {
     errors: response.errors
   };
 }
+function postMatchesFilter(post, filter) {
+  const needle = filter.toLowerCase();
+  return [post.text, post.author?.username, post.author?.name].some(
+    (value) => value?.toLowerCase().includes(needle)
+  );
+}
 function sortPostsChronologically(posts) {
   return [...posts].sort((left, right) => {
     const leftTime = left.created_at ? Date.parse(left.created_at) : 0;
@@ -21732,6 +21738,25 @@ function getClient() {
 async function getUserClient() {
   const { accessToken, userId } = await getUserAccessToken();
   return { client: new XClient({ bearerToken: accessToken }), userId };
+}
+var MAX_FILTER_PAGES = 5;
+async function collectFilteredPosts(fetchPage, filter, wanted, startToken) {
+  const matches = [];
+  let nextToken = startToken;
+  let scanned = 0;
+  for (let page = 0; page < MAX_FILTER_PAGES; page += 1) {
+    const result = formatPostList(await fetchPage(nextToken));
+    scanned += result.data.length;
+    matches.push(...result.data.filter((post) => postMatchesFilter(post, filter)));
+    nextToken = result.meta?.next_token;
+    if (!nextToken || matches.length >= wanted) break;
+  }
+  return {
+    data: matches.slice(0, wanted),
+    filter,
+    scanned,
+    next_token: nextToken
+  };
 }
 function jsonResult(payload) {
   return {
@@ -22011,14 +22036,24 @@ server.tool(
 );
 server.tool(
   "get_bookmarks",
-  "List the authenticated user's bookmarked posts, most recent first. Requires a one-time login (npm run login in plugins/x/server).",
+  "List the authenticated user's bookmarked posts, most recent first. Pass filter to find a specific saved post; the X API has no bookmark search, so the server scans up to 500 recent bookmarks and matches text and author locally. Requires a one-time login (npm run login in plugins/x/server).",
   {
-    max_results: external_exports.number().int().min(1).max(100).optional().describe("Number of bookmarks to return (1-100). Defaults to 10."),
-    next_token: external_exports.string().optional().describe("Pagination token from a previous get_bookmarks response.")
+    max_results: external_exports.number().int().min(1).max(100).optional().describe("Number of bookmarks (or filter matches) to return (1-100). Defaults to 10."),
+    next_token: external_exports.string().optional().describe("Pagination token from a previous get_bookmarks response."),
+    filter: external_exports.string().optional().describe("Case-insensitive substring matched against post text and author handle/name, e.g. img2threejs")
   },
-  async ({ max_results, next_token }) => {
+  async ({ max_results, next_token, filter }) => {
     try {
       const { client, userId } = await getUserClient();
+      if (filter) {
+        const result2 = await collectFilteredPosts(
+          (token) => client.getBookmarks(userId, { maxResults: 100, nextToken: token }),
+          filter,
+          max_results ?? 10,
+          next_token
+        );
+        return jsonResult(result2);
+      }
       const result = await client.getBookmarks(userId, { maxResults: max_results, nextToken: next_token });
       return jsonResult(formatPostList(result));
     } catch (error2) {
@@ -22062,14 +22097,24 @@ server.tool(
 );
 server.tool(
   "get_liked_posts",
-  "List posts the authenticated user has liked, most recent first. Requires a one-time login (npm run login in plugins/x/server).",
+  "List posts the authenticated user has liked, most recent first. Pass filter to find a specific liked post; the X API has no like search, so the server scans up to 500 recent likes and matches text and author locally. Requires a one-time login (npm run login in plugins/x/server).",
   {
-    max_results: external_exports.number().int().min(5).max(100).optional().describe("Number of posts to return (5-100). Defaults to 10."),
-    next_token: external_exports.string().optional().describe("Pagination token from a previous get_liked_posts response.")
+    max_results: external_exports.number().int().min(5).max(100).optional().describe("Number of posts (or filter matches) to return (5-100). Defaults to 10."),
+    next_token: external_exports.string().optional().describe("Pagination token from a previous get_liked_posts response."),
+    filter: external_exports.string().optional().describe("Case-insensitive substring matched against post text and author handle/name")
   },
-  async ({ max_results, next_token }) => {
+  async ({ max_results, next_token, filter }) => {
     try {
       const { client, userId } = await getUserClient();
+      if (filter) {
+        const result2 = await collectFilteredPosts(
+          (token) => client.getLikedPosts(userId, { maxResults: 100, nextToken: token }),
+          filter,
+          max_results ?? 10,
+          next_token
+        );
+        return jsonResult(result2);
+      }
       const result = await client.getLikedPosts(userId, { maxResults: max_results, nextToken: next_token });
       return jsonResult(formatPostList(result));
     } catch (error2) {
