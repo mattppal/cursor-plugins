@@ -16,13 +16,18 @@ Public tools need an app-only bearer token. If a tool fails with a missing or in
 3. Copy the **Bearer Token** (app-only auth).
 4. Set it in **Cursor Settings → Plugins → X → Configure** as `X_BEARER_TOKEN`.
 
-Personal tools (`get_bookmarks`, `get_home_timeline`, `get_liked_posts`) need a one-time OAuth login. If one fails asking for login, have the user run it in a terminal outside Cursor:
+Personal tools (`get_bookmarks`, `get_home_timeline`, `get_liked_posts`) need a one-time OAuth login. If one fails asking for login, run the flow from chat:
+
+1. Call `start_login` and show the user the returned `authorize_url` as a clickable link. Ask them to open it and approve access (the link expires after 5 minutes).
+2. After they confirm, call `get_auth_status`. When it reports `user_logged_in: true`, retry the personal tool.
+
+`start_login` needs **X OAuth Client ID** and **X OAuth Client Secret** in **Cursor Settings → Plugins → X → Configure** (from the Developer Portal: app type Web App, redirect URI `http://127.0.0.1:8917/callback`). If they are not set, ask the user to add them and reload, or fall back to the terminal flow:
 
 ```bash
 cd plugins/x/server && npm run login
 ```
 
-The script asks for the app's OAuth 2.0 Client ID and Secret, opens a browser to authorize, and saves tokens to `~/.cursor/x-plugin/tokens.json`. The server refreshes them automatically afterward.
+Either flow saves tokens to `~/.cursor/x-plugin/tokens.json`. The server refreshes them automatically afterward.
 
 ## Choose a tool
 
@@ -39,6 +44,8 @@ The script asks for the app's OAuth 2.0 Client ID and Secret, opens a browser to
 | The user's saved bookmarks | `get_bookmarks` |
 | The user's home feed | `get_home_timeline` |
 | Posts the user has liked | `get_liked_posts` |
+| Start the one-time account login | `start_login` |
+| Check token and login state | `get_auth_status` |
 | Remaining project quota | `get_api_usage` |
 
 Timeline tools accept usernames. Resolve `@username` with `get_user` only when a later call needs the numeric ID.
@@ -82,10 +89,14 @@ When the user gives an explicit time window, pass it as `start_time` / `end_time
 
 ## Login troubleshooting
 
-- "No X user credentials found": run `npm run login` in `plugins/x/server`.
+Check `get_auth_status` first; it reports both token states and any in-progress login.
+
+- "No X user credentials found": run the login (`start_login`, or `npm run login` in `plugins/x/server`).
 - "credentials expired or were revoked": re-run the login; the refresh token was invalidated.
+- `start_login` reports missing client credentials: have the user set X OAuth Client ID and Secret in plugin Configure and reload.
+- Port 8917 in use: another login is pending, possibly in a different Cursor window. Finish or abandon it first.
 - Token exchange fails with `invalid_request`: confirm the app is a confidential (Web App) client and that `http://127.0.0.1:8917/callback` is registered exactly as a redirect URI.
-- 403 on `get_home_timeline` only: the endpoint may need an extra scope on some plans. Re-run login with `npm run login -- --scopes "tweet.read users.read bookmark.read like.read timeline.read offline.access"`.
+- 403 on `get_home_timeline` only: the endpoint may need an extra scope on some plans. Re-run `start_login` with scopes `tweet.read users.read bookmark.read like.read timeline.read offline.access`.
 
 ## Out of scope
 

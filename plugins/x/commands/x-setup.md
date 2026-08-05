@@ -32,17 +32,15 @@ Only walk through this if the user wants `get_bookmarks`, `get_home_timeline`, o
    - Set the app type to **Web App** (confidential client)
    - Register the redirect URI `http://127.0.0.1:8917/callback` exactly
    - Copy the **OAuth 2.0 Client ID and Client Secret**
-2. Have them run the login script in a terminal (not in Cursor chat):
-
-```bash
-cd plugins/x/server && npm run login
-```
-
-3. The script prompts for the client ID and secret, opens a browser to authorize, and saves tokens to `~/.cursor/x-plugin/tokens.json`. Refresh is automatic afterward.
-4. Verify with `get_bookmarks`.
-5. If verification fails, map the error:
-   - "No X user credentials found": the login script has not been run or did not finish
+2. Have them set both values in **Cursor Settings → Plugins → X → Configure** (X OAuth Client ID, X OAuth Client Secret), then reload.
+3. Call `start_login` and give them the returned `authorize_url` as a clickable link. Ask them to open it and approve access.
+4. Confirm with `get_auth_status`, then verify with `get_bookmarks`.
+5. If they prefer not to store the credentials in Configure, the terminal flow works instead: `cd plugins/x/server && npm run login` (prompts for the credentials, opens the browser itself).
+6. If verification fails, map the error:
+   - "No X user credentials found": no login has completed yet
+   - `start_login` reports missing client credentials: the Configure values are not set or the window was not reloaded
+   - Port 8917 in use: another login is pending, possibly in another Cursor window
    - `invalid_request` during login: the app is not a confidential Web App client, or the redirect URI does not match exactly
-   - 403 on `get_home_timeline` only: re-run login adding the `timeline.read` scope via `npm run login -- --scopes "tweet.read users.read bookmark.read like.read timeline.read offline.access"`
+   - 403 on `get_home_timeline` only: re-run `start_login` adding the `timeline.read` scope
 
 Remind them this plugin can only read. It cannot post, like, follow, bookmark, or send DMs.

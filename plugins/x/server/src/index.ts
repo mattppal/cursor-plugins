@@ -1,7 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { getUserAccessToken } from "./auth.ts";
+import { defaultTokenFilePath, getUserAccessToken, readTokenFile } from "./auth.ts";
+import { normalizeScopes, startLoginFlow, type LoginFlow } from "./login-flow.ts";
 import { XApiError, XClient, resolveBearerToken } from "./client.ts";
 import { formatPostList, formatUserList, postMatchesFilter, sortPostsChronologically } from "./format.ts";
 import type { XListResponse, XPost } from "./types.ts";
@@ -347,6 +348,104 @@ server.tool(
     } catch (error) {
       return errorResult(error);
     }
+  }
+);
+
+interface PendingLogin {
+  flow: LoginFlow;
+  status: "pending" | "done" | "error";
+  username?: string;
+  error?: string;
+}
+
+let pendingLogin: PendingLogin | undefined;
+
+server.tool(
+  "start_login",
+  "Start the one-time X account login for get_bookmarks, get_home_timeline, and get_liked_posts. Returns an authorize URL immediately; show it to the user as a clickable link and ask them to approve in the browser. The login completes in the background — verify with get_auth_status, then retry the personal tool. Requires the X OAuth Client ID and Client Secret to be set in plugin Configure.",
+  {
+    scopes: z
+      .string()
+      .optional()
+      .describe(
+        "Space-separated scope override, e.g. 'tweet.read users.read bookmark.read like.read timeline.read offline.access'. Defaults to the standard read scopes."
+      ),
+  },
+  async ({ scopes }) => {
+    try {
+      const clientId = process.env.X_OAUTH_CLIENT_ID?.trim();
+      const clientSecret = process.env.X_OAUTH_CLIENT_SECRET?.trim();
+      if (!clientId || !clientSecret) {
+        throw new Error(
+          "Missing OAuth client credentials. Ask the user to set X OAuth Client ID and X OAuth Client Secret in Cursor Settings → Plugins → X → Configure (from the X Developer Portal, app type Web App, redirect URI http://127.0.0.1:8917/callback), then reload and retry. Alternative: run `cd plugins/x/server && npm run login` in a terminal."
+        );
+      }
+      if (pendingLogin?.status === "pending") {
+        return jsonResult({
+          status: "pending",
+          authorize_url: pendingLogin.flow.authorizeUrl,
+          message: "A login is already waiting. Ask the user to open this link and approve access.",
+        });
+      }
+
+      const flow = await startLoginFlow({
+        clientId,
+        clientSecret,
+        scopes: scopes ? normalizeScopes(scopes.split(/[\s,]+/).filter(Boolean)) : undefined,
+        openBrowser: false,
+      });
+      const entry: PendingLogin = { flow, status: "pending" };
+      pendingLogin = entry;
+      flow.completion.then(
+        (stored) => {
+          entry.status = "done";
+          entry.username = stored.username;
+        },
+        (error) => {
+          entry.status = "error";
+          entry.error = error instanceof Error ? error.message : String(error);
+        }
+      );
+
+      return jsonResult({
+        status: "pending",
+        authorize_url: flow.authorizeUrl,
+        message:
+          "Show this link to the user and ask them to open it and approve access. Then confirm with get_auth_status and retry the personal tool. The link expires after 5 minutes.",
+      });
+    } catch (error) {
+      return errorResult(error);
+    }
+  }
+);
+
+server.tool(
+  "get_auth_status",
+  "Report X auth state: whether the app-only bearer token is set, whether a user login exists (for bookmarks and personal feeds), and the progress of any login started with start_login.",
+  async () => {
+    const status: Record<string, unknown> = {
+      app_bearer_token_configured: Boolean(resolveBearerToken()),
+    };
+    try {
+      const tokens = await readTokenFile();
+      status.user_logged_in = true;
+      status.username = tokens.username;
+      status.user_id = tokens.user_id;
+      status.scopes = tokens.scopes;
+      status.access_token_expires_at = new Date(tokens.expires_at).toISOString();
+    } catch (error) {
+      status.user_logged_in = false;
+      status.detail = error instanceof Error ? error.message : String(error);
+      status.token_file = defaultTokenFilePath();
+    }
+    if (pendingLogin) {
+      status.login_in_progress = {
+        status: pendingLogin.status,
+        username: pendingLogin.username,
+        error: pendingLogin.error,
+      };
+    }
+    return jsonResult(status);
   }
 );
 

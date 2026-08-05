@@ -21153,8 +21153,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+var AUTHORIZE_URL = "https://x.com/i/oauth2/authorize";
 var TOKEN_URL = "https://api.x.com/2/oauth2/token";
-var LOGIN_HINT = "Run `cd plugins/x/server && npm run login` to authorize the X plugin with your account.";
+var DEFAULT_SCOPES = ["tweet.read", "users.read", "bookmark.read", "like.read", "offline.access"];
+var LOGIN_HINT = "Log in first: call the start_login tool and open the returned link (requires X OAuth Client ID and Secret in plugin Configure), or run `cd plugins/x/server && npm run login` in a terminal.";
 var EXPIRY_SKEW_MS = 6e4;
 var OAuthError = class extends Error {
   status;
@@ -21168,6 +21170,43 @@ var OAuthError = class extends Error {
 };
 function defaultTokenFilePath() {
   return join(homedir(), ".cursor", "x-plugin", "tokens.json");
+}
+function generateCodeVerifier() {
+  return base64Url(randomBytes(32));
+}
+function codeChallengeS256(verifier) {
+  return base64Url(createHash("sha256").update(verifier, "ascii").digest());
+}
+function generateState() {
+  return base64Url(randomBytes(16));
+}
+function base64Url(buffer) {
+  return buffer.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function buildAuthorizeUrl(params) {
+  const query = new URLSearchParams({
+    response_type: "code",
+    client_id: params.clientId,
+    redirect_uri: params.redirectUri,
+    scope: params.scopes.join(" "),
+    state: params.state,
+    code_challenge: params.codeChallenge,
+    code_challenge_method: "S256"
+  });
+  return `${AUTHORIZE_URL}?${query}`;
+}
+function exchangeCodeForTokens(params) {
+  return postTokenRequest(
+    {
+      grant_type: "authorization_code",
+      code: params.code,
+      redirect_uri: params.redirectUri,
+      code_verifier: params.codeVerifier
+    },
+    params.clientId,
+    params.clientSecret,
+    params.fetchImpl ?? fetch
+  );
 }
 function refreshAccessToken(params) {
   return postTokenRequest(
@@ -21276,6 +21315,151 @@ async function getUserAccessToken(options = {}) {
 }
 function isFresh(tokens, nowMs) {
   return tokens.expires_at - EXPIRY_SKEW_MS > nowMs;
+}
+
+// src/login-flow.ts
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
+var LOOPBACK_PORT = 8917;
+var LOGIN_TIMEOUT_MS = 5 * 6e4;
+function normalizeScopes(scopes) {
+  const list = scopes?.length ? [...scopes] : [...DEFAULT_SCOPES];
+  if (!list.includes("offline.access")) {
+    list.push("offline.access");
+  }
+  return list;
+}
+function startLoginFlow(options) {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const scopes = normalizeScopes(options.scopes);
+  const timeoutMs = options.timeoutMs ?? LOGIN_TIMEOUT_MS;
+  const codeVerifier = generateCodeVerifier();
+  const state = generateState();
+  return new Promise((resolveFlow, rejectFlow) => {
+    let redirectUri = "";
+    let settleCallback = null;
+    const callbackCode = new Promise((resolve, reject) => {
+      settleCallback = { resolve, reject };
+    });
+    const server2 = createServer((request, response) => {
+      const url = new URL(request.url ?? "/", redirectUri);
+      if (url.pathname !== "/callback") {
+        response.writeHead(404).end("Not found");
+        return;
+      }
+      const finish = (status, message) => {
+        response.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
+        response.end(`<html><body><p>${message}</p><p>You can close this tab.</p></body></html>`);
+      };
+      const error2 = url.searchParams.get("error");
+      if (error2) {
+        finish(400, `Authorization failed: ${error2}`);
+        fail(new Error(`Authorization was denied or failed: ${error2}`));
+        return;
+      }
+      if (url.searchParams.get("state") !== state) {
+        finish(400, "State mismatch. Try running the login again.");
+        fail(new Error("OAuth state mismatch: the callback did not match this login attempt."));
+        return;
+      }
+      const code = url.searchParams.get("code");
+      if (!code) {
+        finish(400, "Missing authorization code.");
+        fail(new Error("The callback did not include an authorization code."));
+        return;
+      }
+      finish(200, "X login complete.");
+      clearTimeout(timeout);
+      server2.close();
+      settleCallback.resolve(code);
+    });
+    const timeout = setTimeout(() => {
+      fail(new Error(`Timed out after ${Math.round(timeoutMs / 6e4)} minutes waiting for the browser callback.`));
+    }, timeoutMs);
+    function fail(error2) {
+      clearTimeout(timeout);
+      server2.close();
+      settleCallback.reject(error2);
+    }
+    server2.on("error", (error2) => {
+      clearTimeout(timeout);
+      if (error2.code === "EADDRINUSE") {
+        rejectFlow(
+          new Error(
+            `Port ${options.port ?? LOOPBACK_PORT} is already in use. Another login may be pending in a different window; finish or cancel it first.`
+          )
+        );
+      } else {
+        rejectFlow(error2);
+      }
+    });
+    server2.listen(options.port ?? LOOPBACK_PORT, "127.0.0.1", () => {
+      const address = server2.address();
+      const port = typeof address === "object" && address ? address.port : LOOPBACK_PORT;
+      redirectUri = `http://127.0.0.1:${port}/callback`;
+      const authorizeUrl = buildAuthorizeUrl({
+        clientId: options.clientId,
+        redirectUri,
+        scopes,
+        state,
+        codeChallenge: codeChallengeS256(codeVerifier)
+      });
+      const completion = callbackCode.then(async (code) => {
+        const tokens = await exchangeCodeForTokens({
+          clientId: options.clientId,
+          clientSecret: options.clientSecret,
+          code,
+          redirectUri,
+          codeVerifier,
+          fetchImpl
+        });
+        if (!tokens.refresh_token) {
+          throw new Error("X did not return a refresh token. Make sure offline.access is in the requested scopes.");
+        }
+        const user = await fetchAuthenticatedUser(tokens.access_token, fetchImpl);
+        const stored = {
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          expires_at: Date.now() + tokens.expires_in * 1e3,
+          user_id: user.id,
+          username: user.username,
+          client_id: options.clientId,
+          client_secret: options.clientSecret,
+          scopes: tokens.scope ? tokens.scope.split(" ") : scopes
+        };
+        await writeTokenFile(stored, options.filePath);
+        return stored;
+      });
+      completion.catch(() => {
+      });
+      if (options.openBrowser) {
+        openBrowser(authorizeUrl);
+      }
+      resolveFlow({
+        authorizeUrl,
+        redirectUri,
+        completion,
+        close: () => fail(new Error("Login cancelled."))
+      });
+    });
+  });
+}
+async function fetchAuthenticatedUser(accessToken, fetchImpl) {
+  const response = await fetchImpl("https://api.x.com/2/users/me", {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  const body = await response.json();
+  if (!response.ok || !body.data?.id) {
+    throw new Error(`Could not resolve the authenticated user (${response.status}): ${body.detail ?? "unknown error"}`);
+  }
+  return { id: body.data.id, username: body.data.username };
+}
+function openBrowser(url) {
+  const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+  const child = spawn(command, [url], { stdio: "ignore", detached: true, shell: process.platform === "win32" });
+  child.on("error", () => {
+  });
+  child.unref();
 }
 
 // src/client.ts
@@ -22032,6 +22216,88 @@ server.tool(
     } catch (error2) {
       return errorResult(error2);
     }
+  }
+);
+var pendingLogin;
+server.tool(
+  "start_login",
+  "Start the one-time X account login for get_bookmarks, get_home_timeline, and get_liked_posts. Returns an authorize URL immediately; show it to the user as a clickable link and ask them to approve in the browser. The login completes in the background \u2014 verify with get_auth_status, then retry the personal tool. Requires the X OAuth Client ID and Client Secret to be set in plugin Configure.",
+  {
+    scopes: external_exports.string().optional().describe(
+      "Space-separated scope override, e.g. 'tweet.read users.read bookmark.read like.read timeline.read offline.access'. Defaults to the standard read scopes."
+    )
+  },
+  async ({ scopes }) => {
+    try {
+      const clientId = process.env.X_OAUTH_CLIENT_ID?.trim();
+      const clientSecret = process.env.X_OAUTH_CLIENT_SECRET?.trim();
+      if (!clientId || !clientSecret) {
+        throw new Error(
+          "Missing OAuth client credentials. Ask the user to set X OAuth Client ID and X OAuth Client Secret in Cursor Settings \u2192 Plugins \u2192 X \u2192 Configure (from the X Developer Portal, app type Web App, redirect URI http://127.0.0.1:8917/callback), then reload and retry. Alternative: run `cd plugins/x/server && npm run login` in a terminal."
+        );
+      }
+      if (pendingLogin?.status === "pending") {
+        return jsonResult({
+          status: "pending",
+          authorize_url: pendingLogin.flow.authorizeUrl,
+          message: "A login is already waiting. Ask the user to open this link and approve access."
+        });
+      }
+      const flow = await startLoginFlow({
+        clientId,
+        clientSecret,
+        scopes: scopes ? normalizeScopes(scopes.split(/[\s,]+/).filter(Boolean)) : void 0,
+        openBrowser: false
+      });
+      const entry = { flow, status: "pending" };
+      pendingLogin = entry;
+      flow.completion.then(
+        (stored) => {
+          entry.status = "done";
+          entry.username = stored.username;
+        },
+        (error2) => {
+          entry.status = "error";
+          entry.error = error2 instanceof Error ? error2.message : String(error2);
+        }
+      );
+      return jsonResult({
+        status: "pending",
+        authorize_url: flow.authorizeUrl,
+        message: "Show this link to the user and ask them to open it and approve access. Then confirm with get_auth_status and retry the personal tool. The link expires after 5 minutes."
+      });
+    } catch (error2) {
+      return errorResult(error2);
+    }
+  }
+);
+server.tool(
+  "get_auth_status",
+  "Report X auth state: whether the app-only bearer token is set, whether a user login exists (for bookmarks and personal feeds), and the progress of any login started with start_login.",
+  async () => {
+    const status = {
+      app_bearer_token_configured: Boolean(resolveBearerToken())
+    };
+    try {
+      const tokens = await readTokenFile();
+      status.user_logged_in = true;
+      status.username = tokens.username;
+      status.user_id = tokens.user_id;
+      status.scopes = tokens.scopes;
+      status.access_token_expires_at = new Date(tokens.expires_at).toISOString();
+    } catch (error2) {
+      status.user_logged_in = false;
+      status.detail = error2 instanceof Error ? error2.message : String(error2);
+      status.token_file = defaultTokenFilePath();
+    }
+    if (pendingLogin) {
+      status.login_in_progress = {
+        status: pendingLogin.status,
+        username: pendingLogin.username,
+        error: pendingLogin.error
+      };
+    }
+    return jsonResult(status);
   }
 );
 server.tool(

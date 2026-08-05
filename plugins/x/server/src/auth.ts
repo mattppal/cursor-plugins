@@ -6,7 +6,8 @@ import { dirname, join } from "node:path";
 export const AUTHORIZE_URL = "https://x.com/i/oauth2/authorize";
 export const TOKEN_URL = "https://api.x.com/2/oauth2/token";
 export const DEFAULT_SCOPES = ["tweet.read", "users.read", "bookmark.read", "like.read", "offline.access"];
-export const LOGIN_HINT = "Run `cd plugins/x/server && npm run login` to authorize the X plugin with your account.";
+export const LOGIN_HINT =
+  "Log in first: call the start_login tool and open the returned link (requires X OAuth Client ID and Secret in plugin Configure), or run `cd plugins/x/server && npm run login` in a terminal.";
 
 /** Refresh when the access token expires within this window. */
 const EXPIRY_SKEW_MS = 60_000;

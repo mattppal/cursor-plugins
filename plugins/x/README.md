@@ -26,11 +26,14 @@ In chat, `/x-setup` walks through the same steps.
 
 ### Log in for personal reads (optional)
 
-`get_bookmarks`, `get_home_timeline`, and `get_liked_posts` read your own account, which requires OAuth 2.0 user context. One-time setup:
+`get_bookmarks`, `get_home_timeline`, and `get_liked_posts` read your own account, which requires OAuth 2.0 user context. One-time portal setup either way:
 
 1. In the [X Developer Portal](https://developer.x.com/en/portal/dashboard), open your app's **User authentication settings**: enable OAuth 2.0, set the type to **Web App** (confidential client), and register the redirect URI `http://127.0.0.1:8917/callback` exactly.
 2. Copy the **OAuth 2.0 Client ID and Client Secret** from **Keys and tokens**.
-3. Run the login script in a terminal:
+
+**From chat (recommended):** set the client ID and secret in **Cursor Settings → Plugins → X → Configure**, reload, then ask the agent for your bookmarks. It calls the `start_login` tool, gives you a link to click, and retries once you approve in the browser.
+
+**From a terminal:**
 
 ```bash
 cd plugins/x/server
@@ -38,9 +41,11 @@ npm install
 npm run login
 ```
 
-The script prompts for the client ID and secret (or reads `X_OAUTH_CLIENT_ID` / `X_OAUTH_CLIENT_SECRET`), opens a browser to authorize, and writes tokens to `~/.cursor/x-plugin/tokens.json` with mode 0600. The MCP server refreshes them silently from then on; you should not need to log in again unless you revoke access.
+The script prompts for the client ID and secret (or reads `X_OAUTH_CLIENT_ID` / `X_OAUTH_CLIENT_SECRET`) and opens the browser itself.
 
-If `get_home_timeline` returns 403 on your plan, retry the login with an extra scope: `npm run login -- --scopes "tweet.read users.read bookmark.read like.read timeline.read offline.access"`.
+Both flows write tokens to `~/.cursor/x-plugin/tokens.json` with mode 0600. The MCP server refreshes them silently from then on; you should not need to log in again unless you revoke access.
+
+If `get_home_timeline` returns 403 on your plan, retry the login with an extra scope (`timeline.read`), either via `start_login`'s `scopes` parameter or `npm run login -- --scopes "tweet.read users.read bookmark.read like.read timeline.read offline.access"`.
 
 ## Tools
 
@@ -57,6 +62,8 @@ If `get_home_timeline` returns 403 on your plan, retry the login with an extra s
 | `get_bookmarks` | Your bookmarked posts, with a `filter` keyword search (requires login) |
 | `get_home_timeline` | Your reverse-chronological home feed (requires login) |
 | `get_liked_posts` | Posts you have liked, with a `filter` keyword search (requires login) |
+| `start_login` | Start the one-time account login from chat |
+| `get_auth_status` | Report token and login state |
 | `get_api_usage` | Project post-read usage |
 
 ## Develop the MCP server
